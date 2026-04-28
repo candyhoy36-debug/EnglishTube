@@ -19,4 +19,14 @@
     <string name="player_placeholder_sprint1">Sprint 1: routing đã hoạt động. Sprint 2 sẽ thay placeholder này bằng YouTube IFrame Player + danh sách phụ đề song ngữ.</string>
     <string name="extra_video_id_label">Video ID: %1$s</string>
     <string name="error_no_youtube_app">Chưa cài app YouTube trên thiết bị.</string>
+
+    <!-- Subtitle states -->
+    <string name="loading_subtitles">Đang tải phụ đề…</string>
+    <string name="no_subtitle_banner">Video này không có phụ đề tiếng Anh — bạn vẫn có thể xem video bình thường.</string>
+    <string name="fetch_failed_title">Không tải được phụ đề</string>
+    <string name="fetch_failed_message">Video có phụ đề tiếng Anh nhưng app không tải được do giới hạn của YouTube. Bạn muốn làm gì tiếp theo?</string>
+    <string name="action_upload_srt">Tải file SRT lên</string>
+    <string name="action_watch_only">Xem video bình thường</string>
+    <string name="action_retry">Thử lại</string>
+    <string name="upload_srt_not_yet">Tính năng upload SRT sẽ có ở Sprint 6.</string>
 </resources>

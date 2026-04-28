@@ -15,4 +15,7 @@
 
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <color name="banner_warning_bg">#FFFFF8E1</color>
+    <color name="banner_warning_text">#FF6D4C00</color>
 </resources>
