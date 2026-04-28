@@ -76,4 +76,49 @@ public class TimedTextParserTest {
         List<SubtitleLine> lines = TimedTextParser.parse(xml);
         assertEquals("Café — à bientôt", lines.get(0).textEn);
     }
+
+    @Test
+    public void parsesSrv3Format() {
+        String xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                + "<timedtext format=\"3\"><body>"
+                + "<p t=\"0\" d=\"3500\">Hello world</p>"
+                + "<p t=\"3500\" d=\"2000\">how are you</p>"
+                + "</body></timedtext>";
+        List<SubtitleLine> lines = TimedTextParser.parse(xml);
+        assertEquals(2, lines.size());
+        assertEquals(0L, lines.get(0).startMs);
+        assertEquals(3500L, lines.get(0).endMs);
+        assertEquals("Hello world", lines.get(0).textEn);
+        assertEquals(3500L, lines.get(1).startMs);
+        assertEquals(5500L, lines.get(1).endMs);
+    }
+
+    @Test
+    public void parsesSrv3WithWordSegments() {
+        // Auto-generated captions wrap each word in <s ac="..."> ... </s>.
+        String xml = "<timedtext format=\"3\"><body>"
+                + "<p t=\"1000\" d=\"4000\">"
+                + "<s ac=\"200\">Hello</s><s ac=\"180\"> world</s>"
+                + "</p></body></timedtext>";
+        List<SubtitleLine> lines = TimedTextParser.parse(xml);
+        assertEquals(1, lines.size());
+        assertEquals(1000L, lines.get(0).startMs);
+        assertEquals(5000L, lines.get(0).endMs);
+        assertEquals("Hello world", lines.get(0).textEn);
+    }
+
+    @Test
+    public void srv1WinsOverSrv3WhenBothPresent() {
+        // Pathological input \u2014 srv1 should be preferred because it is what
+        // we explicitly request via fmt=srv1.
+        String xml = "<transcript>"
+                + "<text start=\"0\" dur=\"1\">srv1 line</text>"
+                + "</transcript>"
+                + "<timedtext format=\"3\"><body>"
+                + "<p t=\"5000\" d=\"1000\">srv3 line</p>"
+                + "</body></timedtext>";
+        List<SubtitleLine> lines = TimedTextParser.parse(xml);
+        assertEquals(1, lines.size());
+        assertEquals("srv1 line", lines.get(0).textEn);
+    }
 }

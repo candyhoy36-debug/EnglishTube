@@ -201,20 +201,20 @@ public class YouTubeSubtitleService implements SubtitleService {
         try {
             // Always try the legacy format we can parse.
             String forced = forceFmt(baseUrl, "srv1");
-            List<SubtitleLine> lines = parse(simpleGet(forced));
+            List<SubtitleLine> lines = parseLogged(simpleGet(forced), "fmt=srv1");
             if (!lines.isEmpty()) return lines;
 
             // Some baseUrls reject the override; fall back to whatever the URL
             // originally requested.
             if (!forced.equals(baseUrl)) {
-                lines = parse(simpleGet(baseUrl));
+                lines = parseLogged(simpleGet(baseUrl), "original");
                 if (!lines.isEmpty()) return lines;
             }
 
             // Last resort: try stripping the format hint entirely.
             String stripped = stripParam(baseUrl, "fmt");
             if (!stripped.equals(baseUrl) && !stripped.equals(forced)) {
-                lines = parse(simpleGet(stripped));
+                lines = parseLogged(simpleGet(stripped), "no-fmt");
                 if (!lines.isEmpty()) return lines;
             }
             return Collections.emptyList();
@@ -269,6 +269,25 @@ public class YouTubeSubtitleService implements SubtitleService {
     private static List<SubtitleLine> parse(@Nullable String xml) {
         if (xml == null) return Collections.emptyList();
         return TimedTextParser.parse(xml);
+    }
+
+    /**
+     * Parses {@code body} like {@link #parse} but logs a sample of the body
+     * when the parser returns no lines, so we can tell from logcat whether
+     * the server returned an unrecognised format.
+     */
+    private static List<SubtitleLine> parseLogged(@Nullable String body, String label) {
+        if (body == null) {
+            Log.d(TAG, label + " body=null");
+            return Collections.emptyList();
+        }
+        List<SubtitleLine> lines = TimedTextParser.parse(body);
+        if (lines.isEmpty()) {
+            int len = body.length();
+            String sample = body.substring(0, Math.min(200, len)).replaceAll("\\s+", " ");
+            Log.w(TAG, label + " body=" + len + "B unparsed sample=\"" + sample + "\"");
+        }
+        return lines;
     }
 
     // -- HTTP helper ----------------------------------------------------------
