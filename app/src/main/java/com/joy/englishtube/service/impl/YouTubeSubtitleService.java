@@ -53,11 +53,37 @@ public class YouTubeSubtitleService implements SubtitleService {
     private static final String INNERTUBE_KEY =
             "AIzaSyAO_FGJTwqd-7VmZsKNRoxrqUiL0VfKvVM";
 
-    private static final String UA =
+    private static final String UA_WEB =
             "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
-    private static final String INNERTUBE_CLIENT_VERSION = "2.20240814.00.00";
+    private static final String UA_ANDROID =
+            "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip";
+
+    private static final String UA_IOS =
+            "com.google.ios.youtube/19.09.3 (iPhone15,4; U; CPU iOS 17_4 like Mac OS X)";
+
+    /**
+     * yt-dlp-style client roster. ANDROID is tried first because as of 2024
+     * it returns {@code captionTracks} for most public videos without
+     * requiring a PoToken, whereas WEB and IOS are increasingly stripped.
+     */
+    private static final InnertubeClient[] INNERTUBE_CLIENTS = new InnertubeClient[] {
+            new InnertubeClient("ANDROID", "19.09.37", "3", UA_ANDROID, /*sdk*/ 30),
+            new InnertubeClient("WEB", "2.20240814.00.00", "1", UA_WEB, /*sdk*/ 0),
+            new InnertubeClient("IOS", "19.09.3", "5", UA_IOS, /*sdk*/ 0),
+    };
+
+    private static final class InnertubeClient {
+        final String name;
+        final String version;
+        final String headerNum;
+        final String userAgent;
+        final int androidSdk;
+        InnertubeClient(String n, String v, String h, String ua, int sdk) {
+            name = n; version = v; headerNum = h; userAgent = ua; androidSdk = sdk;
+        }
+    }
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -140,35 +166,59 @@ public class YouTubeSubtitleService implements SubtitleService {
 
     // -- Innertube ------------------------------------------------------------
 
+    /**
+     * Tries the Innertube /player endpoint with each client in turn and
+     * returns the first response that actually carries a captionTracks
+     * block. WEB has been getting captions stripped, ANDROID still works,
+     * IOS works for some age-gated videos.
+     */
     @Nullable
     private String innertubePlayer(String videoId) {
-        String body = "{"
-                + "\"context\":{"
-                +   "\"client\":{"
-                +     "\"clientName\":\"WEB\","
-                +     "\"clientVersion\":\"" + INNERTUBE_CLIENT_VERSION + "\","
-                +     "\"hl\":\"en\","
-                +     "\"gl\":\"US\""
-                +   "}"
-                + "},"
-                + "\"videoId\":\"" + videoId + "\""
-                + "}";
+        for (InnertubeClient c : INNERTUBE_CLIENTS) {
+            String json = innertubeOnce(videoId, c);
+            if (json == null) continue;
+            // Cheap heuristic: if it doesn't even mention captionTracks, the
+            // captions block is missing and there's no point parsing.
+            if (!json.contains("captionTracks")) {
+                Log.d(TAG, "innertube " + c.name + " → no captionTracks (" + json.length() + "B)");
+                continue;
+            }
+            Log.d(TAG, "innertube " + c.name + " → captionTracks present (" + json.length() + "B)");
+            return json;
+        }
+        return null;
+    }
+
+    @Nullable
+    private String innertubeOnce(String videoId, InnertubeClient c) {
+        StringBuilder bodyJson = new StringBuilder(256);
+        bodyJson.append("{\"context\":{\"client\":{")
+                .append("\"clientName\":\"").append(c.name).append("\",")
+                .append("\"clientVersion\":\"").append(c.version).append("\",")
+                .append("\"hl\":\"en\",")
+                .append("\"gl\":\"US\"");
+        if (c.androidSdk > 0) {
+            bodyJson.append(",\"androidSdkVersion\":").append(c.androidSdk);
+        }
+        bodyJson.append("}},")
+                .append("\"videoId\":\"").append(videoId).append("\",")
+                .append("\"contentCheckOk\":true,\"racyCheckOk\":true}");
 
         Request req = new Request.Builder()
                 .url("https://www.youtube.com/youtubei/v1/player?key="
                         + INNERTUBE_KEY + "&prettyPrint=false")
-                .post(RequestBody.create(body, JSON))
-                .header("User-Agent", UA)
+                .post(RequestBody.create(bodyJson.toString(), JSON))
+                .header("User-Agent", c.userAgent)
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .header("Origin", "https://www.youtube.com")
                 .header("Referer", "https://www.youtube.com/")
-                .header("X-Youtube-Client-Name", "1")
-                .header("X-Youtube-Client-Version", INNERTUBE_CLIENT_VERSION)
+                .header("X-Youtube-Client-Name", c.headerNum)
+                .header("X-Youtube-Client-Version", c.version)
                 .header("Content-Type", "application/json")
                 .build();
         try (Response resp = client.newCall(req).execute()) {
             if (!resp.isSuccessful()) {
-                Log.w(TAG, "innertube HTTP " + resp.code());
+                Log.w(TAG, "innertube " + c.name + " HTTP " + resp.code());
                 return null;
             }
             ResponseBody rb = resp.body();
@@ -176,7 +226,7 @@ public class YouTubeSubtitleService implements SubtitleService {
             String s = rb.string();
             return s.isEmpty() ? null : s;
         } catch (IOException e) {
-            Log.w(TAG, "innertube IO", e);
+            Log.w(TAG, "innertube " + c.name + " IO", e);
             return null;
         }
     }
@@ -296,7 +346,7 @@ public class YouTubeSubtitleService implements SubtitleService {
     private String simpleGet(String url) {
         Request req = new Request.Builder()
                 .url(url)
-                .header("User-Agent", UA)
+                .header("User-Agent", UA_WEB)
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .header("Origin", "https://www.youtube.com")
                 .header("Referer", "https://www.youtube.com/")
