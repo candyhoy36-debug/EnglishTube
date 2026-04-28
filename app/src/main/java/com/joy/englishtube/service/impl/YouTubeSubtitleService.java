@@ -1,5 +1,7 @@
 package com.joy.englishtube.service.impl;
 
+import android.util.Log;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -45,6 +47,8 @@ import okhttp3.ResponseBody;
  */
 public class YouTubeSubtitleService implements SubtitleService {
 
+    private static final String TAG = "SubtitleService";
+
     /** Public web Innertube key — same one the youtube.com page uses. */
     private static final String INNERTUBE_KEY =
             "AIzaSyAO_FGJTwqd-7VmZsKNRoxrqUiL0VfKvVM";
@@ -69,27 +73,36 @@ public class YouTubeSubtitleService implements SubtitleService {
             throws SubtitleUnavailableException, FetchFailedException {
 
         boolean trackSeen = false;
+        Log.d(TAG, "fetch start videoId=" + videoId);
 
         // ---- Tier 1: Innertube --------------------------------------------
         String innertubeJson = innertubePlayer(videoId);
+        Log.d(TAG, "tier1 innertube payload "
+                + (innertubeJson == null ? "null" : innertubeJson.length() + " chars"));
         if (innertubeJson != null) {
             CaptionsTrackResolver.Track track =
                     CaptionsTrackResolver.findEnglishTrack(innertubeJson);
+            Log.d(TAG, "tier1 resolved track=" + describe(track));
             if (track != null) {
                 trackSeen = true;
                 List<SubtitleLine> lines = downloadCaptionTrack(track.baseUrl);
+                Log.d(TAG, "tier1 download lines=" + lines.size());
                 if (!lines.isEmpty()) return lines;
             }
         }
 
         // ---- Tier 2: HTML scrape ------------------------------------------
         String html = simpleGet(watchUrl(videoId));
+        Log.d(TAG, "tier2 html payload "
+                + (html == null ? "null" : html.length() + " chars"));
         if (html != null) {
             CaptionsTrackResolver.Track track =
                     CaptionsTrackResolver.findEnglishTrack(html);
+            Log.d(TAG, "tier2 resolved track=" + describe(track));
             if (track != null) {
                 trackSeen = true;
                 List<SubtitleLine> lines = downloadCaptionTrack(track.baseUrl);
+                Log.d(TAG, "tier2 download lines=" + lines.size());
                 if (!lines.isEmpty()) return lines;
             }
         }
@@ -99,6 +112,7 @@ public class YouTubeSubtitleService implements SubtitleService {
                 legacyTimedText(videoId, false),
                 legacyTimedText(videoId, true) }) {
             List<SubtitleLine> lines = downloadCaptionTrack(url);
+            Log.d(TAG, "tier3 " + url + " → lines=" + lines.size());
             if (!lines.isEmpty()) {
                 trackSeen = true;
                 return lines;
@@ -106,12 +120,22 @@ public class YouTubeSubtitleService implements SubtitleService {
         }
 
         if (trackSeen) {
+            Log.w(TAG, "all tiers exhausted, track seen but body empty for " + videoId);
             throw new FetchFailedException(
                     "Caption track exists but body could not be downloaded for "
                             + videoId, null);
         }
+        Log.w(TAG, "no English caption track for " + videoId);
         throw new SubtitleUnavailableException(
                 "No English caption track for " + videoId);
+    }
+
+    private static String describe(@Nullable CaptionsTrackResolver.Track t) {
+        if (t == null) return "null";
+        return "{lang=" + t.languageCode + ", kind=" + t.kind
+                + ", url=" + (t.baseUrl == null ? "null"
+                        : t.baseUrl.substring(0, Math.min(120, t.baseUrl.length())))
+                + "…}";
     }
 
     // -- Innertube ------------------------------------------------------------
@@ -143,12 +167,16 @@ public class YouTubeSubtitleService implements SubtitleService {
                 .header("Content-Type", "application/json")
                 .build();
         try (Response resp = client.newCall(req).execute()) {
-            if (!resp.isSuccessful()) return null;
+            if (!resp.isSuccessful()) {
+                Log.w(TAG, "innertube HTTP " + resp.code());
+                return null;
+            }
             ResponseBody rb = resp.body();
             if (rb == null) return null;
             String s = rb.string();
             return s.isEmpty() ? null : s;
         } catch (IOException e) {
+            Log.w(TAG, "innertube IO", e);
             return null;
         }
     }
@@ -233,12 +261,16 @@ public class YouTubeSubtitleService implements SubtitleService {
                 .header("Referer", "https://www.youtube.com/")
                 .build();
         try (Response resp = client.newCall(req).execute()) {
-            if (!resp.isSuccessful()) return null;
+            if (!resp.isSuccessful()) {
+                Log.w(TAG, "GET " + url + " HTTP " + resp.code());
+                return null;
+            }
             ResponseBody body = resp.body();
             if (body == null) return null;
             String s = body.string();
             return s.isEmpty() ? null : s;
         } catch (IOException e) {
+            Log.w(TAG, "GET " + url + " IO", e);
             return null;
         }
     }
