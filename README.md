@@ -64,8 +64,8 @@ com.joy.englishtube
 
 | Sprint | Nội dung |
 |---|---|
-| **0** (PR này) | Skeleton: Gradle, AndroidX, Room, OkHttp, lib YouTube, ML Kit, package layout. App build & launch một MainActivity placeholder. |
-| 1 | MainActivity + WebView + nav bar + chuyển sang PlayerActivity. |
+| 0 | Skeleton: Gradle, AndroidX, Room, OkHttp, lib YouTube, ML Kit, package layout. App build & launch một MainActivity placeholder. |
+| **1** (PR này) | MainActivity + WebView m.youtube.com + Toolbar (History/Bookmarks/Settings) + nav bar (Back/Forward/Reload/Home) + chuyển sang PlayerActivity khi user bấm video. |
 | 2 | YouTubePlayerView + lấy phụ đề EN + list + auto-scroll + xử lý case không có phụ đề. |
 | 3 | TranslationService 2 engine + cache + list song ngữ + tap-to-seek. |
 | 4 | Lặp dòng + Ghép câu + dictionary BottomSheet (long-press). |

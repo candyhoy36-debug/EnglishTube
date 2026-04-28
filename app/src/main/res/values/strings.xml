@@ -7,7 +7,16 @@
     <string name="title_bookmark">Bookmark</string>
     <string name="title_settings">Cài đặt</string>
 
-    <!-- Sprint 0 placeholder -->
-    <string name="skeleton_version_label">EnglishTube skeleton v0.1.0 — Sprint 0</string>
-    <string name="skeleton_description">Khung dự án đã được khởi tạo. Các tính năng (WebView YouTube, phụ đề song ngữ, lặp/ghép câu, overlay landscape, từ điển, lịch sử, bookmark, settings) sẽ được triển khai từ Sprint 1.</string>
+    <!-- Navigation -->
+    <string name="nav_back">Quay lại</string>
+    <string name="nav_forward">Tiến lên</string>
+    <string name="nav_reload">Tải lại</string>
+    <string name="nav_home">Trang chủ</string>
+
+    <!-- Player -->
+    <string name="title_player">Trình phát</string>
+    <string name="open_in_youtube">Mở trên YouTube</string>
+    <string name="player_placeholder_sprint1">Sprint 1: routing đã hoạt động. Sprint 2 sẽ thay placeholder này bằng YouTube IFrame Player + danh sách phụ đề song ngữ.</string>
+    <string name="extra_video_id_label">Video ID: %1$s</string>
+    <string name="error_no_youtube_app">Chưa cài app YouTube trên thiết bị.</string>
 </resources>
