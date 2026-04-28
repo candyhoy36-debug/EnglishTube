@@ -191,29 +191,51 @@ public class YouTubeSubtitleService implements SubtitleService {
      * doesn't explicitly request a format yet.
      */
     @NonNull
-    private List<SubtitleLine> downloadCaptionTrack(String baseUrl) {
-        if (baseUrl == null || baseUrl.isEmpty()) return Collections.emptyList();
+    private List<SubtitleLine> downloadCaptionTrack(String rawUrl) {
+        if (rawUrl == null || rawUrl.isEmpty()) return Collections.emptyList();
 
-        // Always try the legacy format we can parse.
-        String forced = forceFmt(baseUrl, "srv1");
-        List<SubtitleLine> lines = parse(simpleGet(forced));
-        if (!lines.isEmpty()) return lines;
+        // YouTube sometimes serves caption baseUrls as schemeless or even
+        // host-relative paths ("/api/timedtext?..."), which OkHttp rejects.
+        String baseUrl = absolutize(rawUrl);
 
-        // Some baseUrls reject the override; fall back to whatever the URL
-        // originally requested.
-        if (!forced.equals(baseUrl)) {
-            lines = parse(simpleGet(baseUrl));
+        try {
+            // Always try the legacy format we can parse.
+            String forced = forceFmt(baseUrl, "srv1");
+            List<SubtitleLine> lines = parse(simpleGet(forced));
             if (!lines.isEmpty()) return lines;
-        }
 
-        // Last resort: VTT → also unsupported by parser, but try anyway in
-        // case the server downgrades to srv1 for a stripped URL.
-        String stripped = stripParam(baseUrl, "fmt");
-        if (!stripped.equals(baseUrl) && !stripped.equals(forced)) {
-            lines = parse(simpleGet(stripped));
-            if (!lines.isEmpty()) return lines;
+            // Some baseUrls reject the override; fall back to whatever the URL
+            // originally requested.
+            if (!forced.equals(baseUrl)) {
+                lines = parse(simpleGet(baseUrl));
+                if (!lines.isEmpty()) return lines;
+            }
+
+            // Last resort: try stripping the format hint entirely.
+            String stripped = stripParam(baseUrl, "fmt");
+            if (!stripped.equals(baseUrl) && !stripped.equals(forced)) {
+                lines = parse(simpleGet(stripped));
+                if (!lines.isEmpty()) return lines;
+            }
+            return Collections.emptyList();
+        } catch (IllegalArgumentException badUrl) {
+            // OkHttp throws this for malformed URLs — swallow so the next
+            // tier of the resolver can still run.
+            Log.w(TAG, "download bad URL: " + baseUrl, badUrl);
+            return Collections.emptyList();
         }
-        return Collections.emptyList();
+    }
+
+    /**
+     * Promotes schemeless / host-relative caption URLs to absolute youtube.com
+     * URLs so OkHttp can parse them. Returns the input unchanged if it already
+     * has a scheme.
+     */
+    static String absolutize(String url) {
+        if (url == null || url.isEmpty()) return url;
+        if (url.startsWith("//")) return "https:" + url;
+        if (url.startsWith("/")) return "https://www.youtube.com" + url;
+        return url;
     }
 
     /** Replaces {@code &fmt=...} (or appends one) with the supplied value. */
