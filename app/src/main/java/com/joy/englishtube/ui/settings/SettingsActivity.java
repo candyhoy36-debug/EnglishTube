@@ -1,0 +1,14 @@
+package com.joy.englishtube.ui.settings;
+
+import android.os.Bundle;
+
+import androidx.appcompat.app.AppCompatActivity;
+
+/** Sprint 6 placeholder — PreferenceFragmentCompat will host the settings screens. */
+public class SettingsActivity extends AppCompatActivity {
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+    }
+}

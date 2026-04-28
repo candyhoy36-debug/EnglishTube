@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EnglishTube</string>
+
+    <!-- Activities -->
+    <string name="title_history">Lịch sử</string>
+    <string name="title_bookmark">Bookmark</string>
+    <string name="title_settings">Cài đặt</string>
+
+    <!-- Sprint 0 placeholder -->
+    <string name="skeleton_version_label">EnglishTube skeleton v0.1.0 — Sprint 0</string>
+    <string name="skeleton_description">Khung dự án đã được khởi tạo. Các tính năng (WebView YouTube, phụ đề song ngữ, lặp/ghép câu, overlay landscape, từ điển, lịch sử, bookmark, settings) sẽ được triển khai từ Sprint 1.</string>
+</resources>
