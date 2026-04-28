@@ -29,4 +29,11 @@
     <string name="action_watch_only">Xem video bình thường</string>
     <string name="action_retry">Thử lại</string>
     <string name="upload_srt_not_yet">Tính năng upload SRT sẽ có ở Sprint 6.</string>
+
+    <!-- Player error -->
+    <string name="action_open_in_youtube">Mở trên YouTube</string>
+    <string name="player_error_embed_disabled">Chủ video tắt tính năng phát nhúng. Bạn cần mở video này trực tiếp trên YouTube.</string>
+    <string name="player_error_video_not_found">Không tìm thấy video.</string>
+    <string name="player_error_html5">Video này không phát được trong app (lỗi HTML5 player).</string>
+    <string name="player_error_unknown">Không phát được video. Mã lỗi: %1$s</string>
 </resources>

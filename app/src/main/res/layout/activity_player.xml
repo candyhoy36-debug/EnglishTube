@@ -62,28 +62,46 @@
             android:layout_height="wrap_content"
             android:layout_gravity="top"
             android:background="@color/banner_warning_bg"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:padding="16dp"
             android:visibility="gone"
             tools:visibility="visible">
 
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_gravity="center_vertical"
-                android:contentDescription="@null"
-                android:src="@drawable/ic_warning"
-                app:tint="@color/banner_warning_text"
-                xmlns:app="http://schemas.android.com/apk/res-auto" />
-
-            <TextView
-                android:id="@+id/tv_banner_message"
-                android:layout_width="0dp"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:text="@string/no_subtitle_banner"
-                android:textColor="@color/banner_warning_text" />
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="center_vertical"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_warning"
+                    app:tint="@color/banner_warning_text" />
+
+                <TextView
+                    android:id="@+id/tv_banner_message"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:text="@string/no_subtitle_banner"
+                    android:textColor="@color/banner_warning_text" />
+
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_open_in_youtube"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginTop="4dp"
+                android:text="@string/action_open_in_youtube"
+                android:textColor="@color/banner_warning_text"
+                android:visibility="gone"
+                tools:visibility="visible" />
 
         </LinearLayout>
 
