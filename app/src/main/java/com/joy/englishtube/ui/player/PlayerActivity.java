@@ -1,12 +1,17 @@
 package com.joy.englishtube.ui.player;
 
-import android.content.ActivityNotFoundException;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -21,6 +26,10 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.joy.englishtube.EnglishTubeApp;
 import com.joy.englishtube.R;
 import com.joy.englishtube.data.SubtitleCacheDao;
@@ -30,11 +39,6 @@ import com.joy.englishtube.service.PlayerSyncController;
 import com.joy.englishtube.service.SubtitleService;
 import com.joy.englishtube.service.impl.PlayerSyncControllerImpl;
 import com.joy.englishtube.service.impl.YouTubeSubtitleService;
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants;
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer;
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener;
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions;
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView;
 
 import java.lang.reflect.Type;
 import java.util.Collections;
@@ -42,29 +46,24 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
-
 import okhttp3.OkHttpClient;
 
 /**
- * Sprint 2: hosts {@link YouTubePlayerView} on top and a bilingual subtitle
- * RecyclerView below. Subtitle text is fetched in the background through
- * {@link YouTubeSubtitleService} and cached in Room.
+ * Sprint 2 (architecture pivot): host the YouTube mobile web page in a
+ * WebView so we can play any video — including those whose owner has disabled
+ * the IFrame embed. Our subtitle UI is overlaid via a Material bottom sheet
+ * triggered by a FloatingActionButton; time sync between the &lt;video&gt; and
+ * the subtitle list is handled by {@link WebViewPlayerBridge}.
  *
- * Three states are surfaced to the user (SRS §1.5):
- *   • Has EN subtitles → list visible, auto-scroll to active line.
- *   • No EN subtitles  → warning banner, video plays normally.
- *   • Track exists but fetch fails → dialog asking the user to upload an SRT
- *     (Sprint 6 will implement the upload picker) or watch without subtitles.
- *
- * Translation to VI is NOT done in Sprint 2 — that is Sprint 3's job. The
- * adapter already supports a VI row but it stays {@code GONE} until Sprint 3.
+ * Sprint 5 will reuse this same WebView to render the bilingual overlay when
+ * the user goes fullscreen + landscape.
  */
-public class PlayerActivity extends AppCompatActivity {
+public class PlayerActivity extends AppCompatActivity
+        implements WebViewPlayerBridge.Callback {
 
     public static final String EXTRA_VIDEO_ID = "extra_video_id";
 
+    private static final String TAG = "PlayerActivity";
     private static final String SUBTITLE_LANG_EN = "en";
     private static final long ACTIVE_LINE_TICK_MS = 250L; // ~4Hz, NFR-05
 
@@ -78,22 +77,29 @@ public class PlayerActivity extends AppCompatActivity {
     @Nullable
     private String videoId;
 
-    private static final String TAG = "PlayerActivity";
+    private WebView webView;
+    private ProgressBar webProgress;
+    private FloatingActionButton fabSubtitles;
 
-    private YouTubePlayerView playerView;
-    private SubtitleAdapter adapter;
-    private LinearLayoutManager layoutManager;
-    private ProgressBar progress;
-    private View bannerNoSubtitle;
-    private TextView bannerMessage;
-    private Button btnOpenInYouTube;
+    // Bottom-sheet-owned views; nullable when the sheet has not been shown yet.
+    @Nullable private BottomSheetDialog subtitleSheet;
+    @Nullable private SubtitleAdapter adapter;
+    @Nullable private LinearLayoutManager layoutManager;
+    @Nullable private ProgressBar subtitleProgress;
+    @Nullable private View bannerNoSubtitle;
+    @Nullable private TextView bannerMessage;
+    @Nullable private Button btnRetryFetch;
 
-    @Nullable
-    private YouTubePlayer player;
     private final PlayerSyncController syncController = new PlayerSyncControllerImpl();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final OkHttpClient http = new OkHttpClient();
     private long lastTickMs = 0L;
 
+    private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
+    private SubtitleState state = SubtitleState.LOADING;
+    private List<SubtitleLine> latestLines = Collections.emptyList();
+
+    @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -110,117 +116,159 @@ public class PlayerActivity extends AppCompatActivity {
         setSupportActionBar(toolbar);
         toolbar.setNavigationOnClickListener(v -> finish());
 
-        playerView = findViewById(R.id.youtube_player_view);
-        RecyclerView recyclerView = findViewById(R.id.recycler_subtitles);
-        progress = findViewById(R.id.subtitle_progress);
-        bannerNoSubtitle = findViewById(R.id.banner_no_subtitle);
-        bannerMessage = findViewById(R.id.tv_banner_message);
-        btnOpenInYouTube = findViewById(R.id.btn_open_in_youtube);
-        btnOpenInYouTube.setOnClickListener(v -> openVideoInYouTube());
+        webView = findViewById(R.id.webview_player);
+        webProgress = findViewById(R.id.web_progress);
+        fabSubtitles = findViewById(R.id.fab_subtitles);
 
-        adapter = new SubtitleAdapter();
-        layoutManager = new LinearLayoutManager(this);
-        recyclerView.setLayoutManager(layoutManager);
-        recyclerView.setAdapter(adapter);
-        adapter.setOnLineClickListener((position, line) -> {
-            if (player != null) player.seekTo(line.startMs / 1000f);
-        });
+        configureWebView();
+        webView.loadUrl("https://m.youtube.com/watch?v=" + videoId);
 
-        getLifecycle().addObserver(playerView);
-        initializePlayer();
+        fabSubtitles.setOnClickListener(v -> showSubtitleSheet());
 
-        progress.setVisibility(View.VISIBLE);
+        syncController.setListener(this::onActiveLineChanged);
         loadSubtitlesAsync(videoId);
     }
 
-    private void initializePlayer() {
-        // Custom IFrame options: rel=0 so suggested videos at the end stay limited to channel.
-        IFramePlayerOptions options = new IFramePlayerOptions.Builder()
-                .controls(1)
-                .rel(0)
-                .build();
+    @SuppressLint("SetJavaScriptEnabled")
+    private void configureWebView() {
+        WebSettings s = webView.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
+        s.setSupportZoom(false);
 
-        // Single listener handles onReady, onCurrentSecond, and onError so we
-        // never call addListener on the YouTubePlayer instance — that secondary
-        // path was implicated in the post-error crash on some video IDs.
-        playerView.initialize(new AbstractYouTubePlayerListener() {
+        // Native ↔ JS bridge. The interface name MUST match
+        // WebViewPlayerBridge.NAME used in the injected JS payload.
+        webView.addJavascriptInterface(new WebViewPlayerBridge(this), WebViewPlayerBridge.NAME);
+
+        webView.setWebChromeClient(new WebChromeClient() {
             @Override
-            public void onReady(@NonNull YouTubePlayer youTubePlayer) {
-                player = youTubePlayer;
-                if (videoId != null) youTubePlayer.cueVideo(videoId, 0f);
+            public void onProgressChanged(WebView view, int newProgress) {
+                webProgress.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
+                webProgress.setProgress(newProgress);
+            }
+        });
+
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
+                // Stay on m.youtube.com for the player WebView; let everything load.
+                return false;
             }
 
             @Override
-            public void onCurrentSecond(@NonNull YouTubePlayer p, float second) {
-                long nowMs = System.currentTimeMillis();
-                if (nowMs - lastTickMs < ACTIVE_LINE_TICK_MS) return;
-                lastTickMs = nowMs;
-                try {
-                    syncController.onTick((long) (second * 1000f));
-                } catch (RuntimeException e) {
-                    Log.w(TAG, "sync onTick failed", e);
-                }
+            public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                webProgress.setVisibility(View.VISIBLE);
             }
 
             @Override
-            public void onError(@NonNull YouTubePlayer p,
-                                @NonNull PlayerConstants.PlayerError error) {
-                Log.w(TAG, "YouTubePlayer error: " + error);
-                showPlayerError(error);
+            public void onPageFinished(WebView v, String url) {
+                webProgress.setVisibility(View.GONE);
+                // Re-install the bridge after every navigation so YouTube's
+                // SPA transitions (auto-play next, redirects to login wall, …)
+                // still get hooked.
+                new WebViewPlayerBridge(PlayerActivity.this).install(v);
             }
-        }, /* handleNetworkEvents= */ true, options);
-
-        syncController.setListener(this::onActiveLineChanged);
+        });
     }
 
-    /**
-     * Surfaces a YouTube IFrame Player error in the warning banner so the user
-     * is not stuck on a black screen. For embed-disabled videos we expose the
-     * "Mở trên YouTube" button so they can finish watching natively.
-     */
-    private void showPlayerError(@NonNull PlayerConstants.PlayerError error) {
-        progress.setVisibility(View.GONE);
-        adapter.submit(Collections.emptyList());
-        syncController.attach(Collections.emptyList());
+    // --- Subtitle bottom sheet ----------------------------------------------
 
-        int messageRes;
-        boolean offerOpenInYouTube = false;
-        switch (error) {
-            case VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER:
-                messageRes = R.string.player_error_embed_disabled;
-                offerOpenInYouTube = true;
-                break;
-            case VIDEO_NOT_FOUND:
-                messageRes = R.string.player_error_video_not_found;
-                break;
-            case HTML_5_PLAYER:
-                messageRes = R.string.player_error_html5;
-                offerOpenInYouTube = true;
-                break;
-            default:
-                bannerMessage.setText(getString(R.string.player_error_unknown, error.name()));
-                bannerNoSubtitle.setVisibility(View.VISIBLE);
-                btnOpenInYouTube.setVisibility(View.VISIBLE);
-                return;
+    private void showSubtitleSheet() {
+        if (subtitleSheet == null) buildSubtitleSheet();
+        // Re-apply current state so the sheet opens with the right view.
+        applyStateToSheet();
+        if (subtitleSheet != null) subtitleSheet.show();
+    }
+
+    private void buildSubtitleSheet() {
+        BottomSheetDialog dialog = new BottomSheetDialog(this);
+        View content = getLayoutInflater().inflate(R.layout.sheet_subtitle_panel, null);
+        dialog.setContentView(content);
+
+        RecyclerView rv = content.findViewById(R.id.recycler_subtitles);
+        subtitleProgress = content.findViewById(R.id.subtitle_progress);
+        bannerNoSubtitle = content.findViewById(R.id.banner_no_subtitle);
+        bannerMessage = content.findViewById(R.id.tv_banner_message);
+        btnRetryFetch = content.findViewById(R.id.btn_retry_fetch);
+
+        adapter = new SubtitleAdapter();
+        layoutManager = new LinearLayoutManager(this);
+        rv.setLayoutManager(layoutManager);
+        rv.setAdapter(adapter);
+        adapter.setOnLineClickListener((position, line) -> {
+            WebViewPlayerBridge.seekTo(webView, line.startMs / 1000.0);
+        });
+
+        btnRetryFetch.setOnClickListener(v -> {
+            state = SubtitleState.LOADING;
+            applyStateToSheet();
+            if (videoId != null) loadSubtitlesAsync(videoId);
+        });
+
+        subtitleSheet = dialog;
+    }
+
+    /** Pushes the current {@link #state} onto whatever sheet views exist. */
+    private void applyStateToSheet() {
+        if (adapter == null || subtitleProgress == null
+                || bannerNoSubtitle == null || bannerMessage == null
+                || btnRetryFetch == null) {
+            return;
         }
-        bannerMessage.setText(messageRes);
-        bannerNoSubtitle.setVisibility(View.VISIBLE);
-        btnOpenInYouTube.setVisibility(offerOpenInYouTube ? View.VISIBLE : View.GONE);
+        switch (state) {
+            case LOADING:
+                subtitleProgress.setVisibility(View.VISIBLE);
+                bannerNoSubtitle.setVisibility(View.GONE);
+                btnRetryFetch.setVisibility(View.GONE);
+                adapter.submit(Collections.emptyList());
+                break;
+            case READY:
+                subtitleProgress.setVisibility(View.GONE);
+                bannerNoSubtitle.setVisibility(View.GONE);
+                btnRetryFetch.setVisibility(View.GONE);
+                adapter.submit(latestLines);
+                break;
+            case NO_SUBTITLE:
+                subtitleProgress.setVisibility(View.GONE);
+                bannerMessage.setText(R.string.no_subtitle_banner);
+                bannerNoSubtitle.setVisibility(View.VISIBLE);
+                btnRetryFetch.setVisibility(View.GONE);
+                adapter.submit(Collections.emptyList());
+                break;
+            case FETCH_FAILED:
+                subtitleProgress.setVisibility(View.GONE);
+                bannerMessage.setText(R.string.fetch_failed_message);
+                bannerNoSubtitle.setVisibility(View.VISIBLE);
+                btnRetryFetch.setVisibility(View.VISIBLE);
+                adapter.submit(Collections.emptyList());
+                break;
+        }
     }
 
-    private void openVideoInYouTube() {
-        if (videoId == null) return;
-        Uri uri = Uri.parse("https://www.youtube.com/watch?v=" + videoId);
-        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-        intent.setPackage("com.google.android.youtube");
+    // --- WebViewPlayerBridge.Callback ---------------------------------------
+
+    @Override
+    public void onReady() {
+        Log.d(TAG, "WebView <video> element ready");
+    }
+
+    @Override
+    public void onTime(float seconds) {
+        long nowMs = System.currentTimeMillis();
+        if (nowMs - lastTickMs < ACTIVE_LINE_TICK_MS) return;
+        lastTickMs = nowMs;
         try {
-            startActivity(intent);
-        } catch (ActivityNotFoundException notInstalled) {
-            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+            syncController.onTick((long) (seconds * 1000f));
+        } catch (RuntimeException e) {
+            Log.w(TAG, "sync onTick failed", e);
         }
     }
 
     private void onActiveLineChanged(int newIndex) {
+        if (adapter == null || layoutManager == null) return;
         adapter.setActiveIndex(newIndex);
         if (newIndex < 0) return;
         if (!getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) return;
@@ -230,8 +278,9 @@ public class PlayerActivity extends AppCompatActivity {
         layoutManager.startSmoothScroll(scroller);
     }
 
-    /** Reads cache first, falls back to live fetch on a worker thread. */
-    private void loadSubtitlesAsync(String videoId) {
+    // --- Subtitle fetch ------------------------------------------------------
+
+    private void loadSubtitlesAsync(@NonNull String videoId) {
         io.execute(() -> {
             try {
                 List<SubtitleLine> lines = readCache(videoId);
@@ -240,59 +289,63 @@ public class PlayerActivity extends AppCompatActivity {
                     return;
                 }
 
-                SubtitleService service = new YouTubeSubtitleService(new OkHttpClient());
+                SubtitleService service = new YouTubeSubtitleService(http);
                 try {
                     List<SubtitleLine> fetched = service.fetch(videoId);
                     writeCache(videoId, fetched);
                     runOnUiThread(() -> applyLines(fetched));
                 } catch (SubtitleService.SubtitleUnavailableException notAvailable) {
-                    runOnUiThread(this::showNoSubtitleBanner);
+                    runOnUiThread(this::onNoSubtitle);
                 } catch (SubtitleService.FetchFailedException fetchFail) {
-                    runOnUiThread(this::showFetchFailedDialog);
+                    runOnUiThread(this::onFetchFailed);
                 }
             } catch (RuntimeException unexpected) {
-                // Network library / parser regressions must NOT crash the
-                // activity. Treat them like a normal fetch failure.
                 Log.e(TAG, "Unexpected subtitle fetch failure", unexpected);
-                runOnUiThread(this::showFetchFailedDialog);
+                runOnUiThread(this::onFetchFailed);
             }
         });
     }
 
-    private void applyLines(List<SubtitleLine> lines) {
-        progress.setVisibility(View.GONE);
-        bannerNoSubtitle.setVisibility(View.GONE);
-        btnOpenInYouTube.setVisibility(View.GONE);
-        adapter.submit(lines);
+    private void applyLines(@NonNull List<SubtitleLine> lines) {
+        latestLines = lines;
+        state = SubtitleState.READY;
         syncController.attach(lines);
+        applyStateToSheet();
     }
 
-    private void showNoSubtitleBanner() {
-        progress.setVisibility(View.GONE);
-        bannerMessage.setText(R.string.no_subtitle_banner);
-        bannerNoSubtitle.setVisibility(View.VISIBLE);
-        btnOpenInYouTube.setVisibility(View.GONE);
-        adapter.submit(Collections.emptyList());
+    private void onNoSubtitle() {
+        latestLines = Collections.emptyList();
+        state = SubtitleState.NO_SUBTITLE;
         syncController.attach(Collections.emptyList());
+        applyStateToSheet();
     }
 
-    private void showFetchFailedDialog() {
-        progress.setVisibility(View.GONE);
-        adapter.submit(Collections.emptyList());
+    private void onFetchFailed() {
+        latestLines = Collections.emptyList();
+        state = SubtitleState.FETCH_FAILED;
         syncController.attach(Collections.emptyList());
+        applyStateToSheet();
 
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.fetch_failed_title)
-                .setMessage(R.string.fetch_failed_message)
-                .setPositiveButton(R.string.action_retry, (d, w) -> {
-                    progress.setVisibility(View.VISIBLE);
-                    loadSubtitlesAsync(videoId);
-                })
-                .setNeutralButton(R.string.action_upload_srt, (d, w) ->
-                        Toast.makeText(this, R.string.upload_srt_not_yet, Toast.LENGTH_SHORT).show())
-                .setNegativeButton(R.string.action_watch_only, (d, w) -> showNoSubtitleBanner())
-                .setCancelable(false)
-                .show();
+        // Also surface the choice dialog the SRS demands the first time we
+        // hit a fetch failure. The user can come back to "Retry" from the
+        // banner inside the sheet later.
+        if (subtitleSheet == null || !subtitleSheet.isShowing()) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.fetch_failed_title)
+                    .setMessage(R.string.fetch_failed_message)
+                    .setPositiveButton(R.string.action_retry, (d, w) -> {
+                        if (videoId != null) {
+                            state = SubtitleState.LOADING;
+                            applyStateToSheet();
+                            loadSubtitlesAsync(videoId);
+                        }
+                    })
+                    .setNeutralButton(R.string.action_upload_srt, (d, w) ->
+                            Toast.makeText(this, R.string.upload_srt_not_yet,
+                                    Toast.LENGTH_SHORT).show())
+                    .setNegativeButton(R.string.action_watch_only, (d, w) -> { /* keep banner */ })
+                    .show();
+        }
     }
 
     // --- Cache ---------------------------------------------------------------
@@ -326,12 +379,30 @@ public class PlayerActivity extends AppCompatActivity {
     // --- Lifecycle -----------------------------------------------------------
 
     @Override
+    protected void onPause() {
+        if (webView != null) webView.onPause();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) webView.onResume();
+    }
+
+    @Override
     protected void onDestroy() {
         syncController.detach();
         io.shutdownNow();
-        if (playerView != null) {
-            playerView.release();
-            playerView = null;
+        if (subtitleSheet != null) {
+            subtitleSheet.dismiss();
+            subtitleSheet = null;
+        }
+        if (webView != null) {
+            webView.removeJavascriptInterface(WebViewPlayerBridge.NAME);
+            webView.stopLoading();
+            webView.destroy();
+            webView = null;
         }
         super.onDestroy();
     }

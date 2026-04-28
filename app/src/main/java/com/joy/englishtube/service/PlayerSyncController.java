@@ -6,9 +6,10 @@ import java.util.List;
 
 /**
  * Watches the YouTube player's current playback time and resolves the active
- * subtitle line. The actual ticking is driven externally by
- * {@code AbstractYouTubePlayerListener.onCurrentSecond}; this class just
- * does the binary search and notifies a listener when the active index changes.
+ * subtitle line. The actual ticking is driven externally — Sprint 2 wires it
+ * to {@link com.joy.englishtube.ui.player.WebViewPlayerBridge}; this class
+ * just does the binary search and notifies a listener when the active index
+ * changes.
  *
  * Throttling: the listener is only fired when {@code activeIndex} actually
  * changes, so emission rate is bounded by the line count, not the tick rate.

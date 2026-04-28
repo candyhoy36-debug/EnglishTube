@@ -8,5 +8,7 @@
 -dontwarn okhttp3.**
 -dontwarn okio.**
 
-# YouTube player
--keep class com.pierfrancescosoffritti.androidyoutubeplayer.** { *; }
+# Bridge methods exposed to JS via @JavascriptInterface (must keep their names)
+-keepclassmembers class com.joy.englishtube.ui.player.WebViewPlayerBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
