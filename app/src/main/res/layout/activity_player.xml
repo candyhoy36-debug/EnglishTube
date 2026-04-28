@@ -28,11 +28,7 @@
         app:layout_constraintTop_toBottomOf="@id/toolbar"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHeight_percent="0.40"
-        app:showFullScreenButton="true"
-        app:showSeekBar="true"
-        app:showVideoTitle="true"
-        app:showYouTubeButton="true" />
+        app:layout_constraintHeight_percent="0.40" />
 
     <FrameLayout
         android:id="@+id/subtitle_container"
