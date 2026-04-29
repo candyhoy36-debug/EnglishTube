@@ -12,80 +12,41 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * Multi-tier subtitle fetcher (SRS R-01).
- *
- * <p>YouTube has progressively tightened the legacy {@code /api/timedtext}
- * endpoint and adds {@code &fmt=srv3} or {@code &pot=...} requirements to the
- * "fresh" baseUrls inside the watch page. To cope, we try several entry
- * points in order of reliability and, for every captionTrack we resolve, we
- * attempt the download with several format hints because the legacy XML
- * format the parser understands is no longer the default.</p>
- *
+ * 3-tier fallback fetcher per SRS R-01:
  * <ol>
- *   <li><b>Innertube</b> — POST to {@code /youtubei/v1/player} with a fake
- *       WEB client context. This returns the same
- *       {@code playerCaptionsTracklistRenderer} block the watch HTML carries,
- *       but with freshly-signed baseUrls that are far more likely to download.</li>
- *   <li><b>Watch-page HTML scrape</b> — same idea but parses the inline
- *       {@code ytInitialPlayerResponse}.</li>
- *   <li><b>Direct legacy URL</b> — last-resort {@code /api/timedtext?lang=en}
- *       with explicit {@code fmt=srv1}.</li>
+ *   <li>{@code timedtext?lang=en&v=ID} (manual EN)</li>
+ *   <li>{@code timedtext?lang=en&kind=asr&v=ID} (auto-generated EN)</li>
+ *   <li>Parse the watch HTML page for {@code playerCaptionsTracklistRenderer},
+ *       then GET the resolved baseUrl. The baseUrl returned by YouTube is
+ *       sometimes host-relative ({@code /api/timedtext?...}) which OkHttp
+ *       refuses to parse, so we run it through {@link #absolutize(String)}
+ *       first.</li>
  * </ol>
  *
- * Throws {@link SubtitleUnavailableException} only if every resolver agrees
- * the video has no English caption track. Throws {@link FetchFailedException}
- * if a track exists but every download attempt produces empty XML — caller
- * (PlayerActivity) then prompts the user to upload an SRT (SRS §1.5).
+ * Throws {@link SubtitleUnavailableException} only when step 3 confirms there
+ * is no English caption track at all. Throws {@link FetchFailedException} if
+ * a track exists but every download attempt produces empty/unparseable body —
+ * the caller (PlayerActivity) then prompts the user to upload an SRT
+ * (SRS §1.5).
+ *
+ * <p>{@link TimedTextParser} understands both the legacy {@code <text>} format
+ * ({@code fmt=srv1}) and the current {@code <p>} format ({@code fmt=srv3}),
+ * so we never explicitly request a format — whatever YouTube serves will be
+ * parsed.</p>
  */
 public class YouTubeSubtitleService implements SubtitleService {
 
     private static final String TAG = "SubtitleService";
 
-    /** Public web Innertube key — same one the youtube.com page uses. */
-    private static final String INNERTUBE_KEY =
-            "AIzaSyAO_FGJTwqd-7VmZsKNRoxrqUiL0VfKvVM";
-
-    private static final String UA_WEB =
+    private static final String UA =
             "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
-
-    private static final String UA_ANDROID =
-            "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip";
-
-    private static final String UA_IOS =
-            "com.google.ios.youtube/19.09.3 (iPhone15,4; U; CPU iOS 17_4 like Mac OS X)";
-
-    /**
-     * yt-dlp-style client roster. ANDROID is tried first because as of 2024
-     * it returns {@code captionTracks} for most public videos without
-     * requiring a PoToken, whereas WEB and IOS are increasingly stripped.
-     */
-    private static final InnertubeClient[] INNERTUBE_CLIENTS = new InnertubeClient[] {
-            new InnertubeClient("ANDROID", "19.09.37", "3", UA_ANDROID, /*sdk*/ 30),
-            new InnertubeClient("WEB", "2.20240814.00.00", "1", UA_WEB, /*sdk*/ 0),
-            new InnertubeClient("IOS", "19.09.3", "5", UA_IOS, /*sdk*/ 0),
-    };
-
-    private static final class InnertubeClient {
-        final String name;
-        final String version;
-        final String headerNum;
-        final String userAgent;
-        final int androidSdk;
-        InnertubeClient(String n, String v, String h, String ua, int sdk) {
-            name = n; version = v; headerNum = h; userAgent = ua; androidSdk = sdk;
-        }
-    }
-
-    private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     private final OkHttpClient client;
 
@@ -98,258 +59,72 @@ public class YouTubeSubtitleService implements SubtitleService {
     public List<SubtitleLine> fetch(String videoId)
             throws SubtitleUnavailableException, FetchFailedException {
 
-        boolean trackSeen = false;
         Log.d(TAG, "fetch start videoId=" + videoId);
 
-        // ---- Tier 1: Innertube --------------------------------------------
-        String innertubeJson = innertubePlayer(videoId);
-        Log.d(TAG, "tier1 innertube payload "
-                + (innertubeJson == null ? "null" : innertubeJson.length() + " chars"));
-        if (innertubeJson != null) {
-            CaptionsTrackResolver.Track track =
-                    CaptionsTrackResolver.findEnglishTrack(innertubeJson);
-            Log.d(TAG, "tier1 resolved track=" + describe(track));
-            if (track != null) {
-                trackSeen = true;
-                List<SubtitleLine> lines = downloadCaptionTrack(track.baseUrl);
-                Log.d(TAG, "tier1 download lines=" + lines.size());
-                if (!lines.isEmpty()) return lines;
-            }
-        }
+        // Tier 1: manual EN
+        List<SubtitleLine> lines = tryFetch(timedTextUrl(videoId, false));
+        Log.d(TAG, "tier1 lines=" + lines.size());
+        if (!lines.isEmpty()) return lines;
 
-        // ---- Tier 2: HTML scrape ------------------------------------------
+        // Tier 2: auto EN
+        lines = tryFetch(timedTextUrl(videoId, true));
+        Log.d(TAG, "tier2 lines=" + lines.size());
+        if (!lines.isEmpty()) return lines;
+
+        // Tier 3: HTML fallback to discover signed baseUrl
         String html = simpleGet(watchUrl(videoId));
-        Log.d(TAG, "tier2 html payload "
+        Log.d(TAG, "tier3 html payload "
                 + (html == null ? "null" : html.length() + " chars"));
-        if (html != null) {
-            CaptionsTrackResolver.Track track =
-                    CaptionsTrackResolver.findEnglishTrack(html);
-            Log.d(TAG, "tier2 resolved track=" + describe(track));
-            if (track != null) {
-                trackSeen = true;
-                List<SubtitleLine> lines = downloadCaptionTrack(track.baseUrl);
-                Log.d(TAG, "tier2 download lines=" + lines.size());
-                if (!lines.isEmpty()) return lines;
-            }
-        }
-
-        // ---- Tier 3: legacy direct URL ------------------------------------
-        for (String url : new String[] {
-                legacyTimedText(videoId, false),
-                legacyTimedText(videoId, true) }) {
-            List<SubtitleLine> lines = downloadCaptionTrack(url);
-            Log.d(TAG, "tier3 " + url + " → lines=" + lines.size());
-            if (!lines.isEmpty()) {
-                trackSeen = true;
-                return lines;
-            }
-        }
-
-        if (trackSeen) {
-            Log.w(TAG, "all tiers exhausted, track seen but body empty for " + videoId);
+        if (html == null) {
             throw new FetchFailedException(
-                    "Caption track exists but body could not be downloaded for "
-                            + videoId, null);
+                    "Could not load watch page for " + videoId, null);
         }
-        Log.w(TAG, "no English caption track for " + videoId);
-        throw new SubtitleUnavailableException(
-                "No English caption track for " + videoId);
+        CaptionsTrackResolver.Track track =
+                CaptionsTrackResolver.findEnglishTrack(html);
+        Log.d(TAG, "tier3 resolved track=" + describe(track));
+        if (track == null) {
+            throw new SubtitleUnavailableException(
+                    "No English caption track for " + videoId);
+        }
+        lines = tryFetch(absolutize(track.baseUrl));
+        Log.d(TAG, "tier3 download lines=" + lines.size());
+        if (!lines.isEmpty()) return lines;
+
+        throw new FetchFailedException(
+                "Track " + track.languageCode + "/" + track.kind
+                        + " exists but body could not be downloaded for "
+                        + videoId, null);
     }
 
-    private static String describe(@Nullable CaptionsTrackResolver.Track t) {
-        if (t == null) return "null";
-        return "{lang=" + t.languageCode + ", kind=" + t.kind
-                + ", url=" + (t.baseUrl == null ? "null"
-                        : t.baseUrl.substring(0, Math.min(120, t.baseUrl.length())))
-                + "…}";
-    }
-
-    // -- Innertube ------------------------------------------------------------
-
-    /**
-     * Tries the Innertube /player endpoint with each client in turn and
-     * returns the first response that actually carries a captionTracks
-     * block. WEB has been getting captions stripped, ANDROID still works,
-     * IOS works for some age-gated videos.
-     */
-    @Nullable
-    private String innertubePlayer(String videoId) {
-        for (InnertubeClient c : INNERTUBE_CLIENTS) {
-            String json = innertubeOnce(videoId, c);
-            if (json == null) continue;
-            // Cheap heuristic: if it doesn't even mention captionTracks, the
-            // captions block is missing and there's no point parsing.
-            if (!json.contains("captionTracks")) {
-                Log.d(TAG, "innertube " + c.name + " → no captionTracks (" + json.length() + "B)");
-                continue;
-            }
-            Log.d(TAG, "innertube " + c.name + " → captionTracks present (" + json.length() + "B)");
-            return json;
-        }
-        return null;
-    }
-
-    @Nullable
-    private String innertubeOnce(String videoId, InnertubeClient c) {
-        StringBuilder bodyJson = new StringBuilder(256);
-        bodyJson.append("{\"context\":{\"client\":{")
-                .append("\"clientName\":\"").append(c.name).append("\",")
-                .append("\"clientVersion\":\"").append(c.version).append("\",")
-                .append("\"hl\":\"en\",")
-                .append("\"gl\":\"US\"");
-        if (c.androidSdk > 0) {
-            bodyJson.append(",\"androidSdkVersion\":").append(c.androidSdk);
-        }
-        bodyJson.append("}},")
-                .append("\"videoId\":\"").append(videoId).append("\",")
-                .append("\"contentCheckOk\":true,\"racyCheckOk\":true}");
-
-        Request req = new Request.Builder()
-                .url("https://www.youtube.com/youtubei/v1/player?key="
-                        + INNERTUBE_KEY + "&prettyPrint=false")
-                .post(RequestBody.create(bodyJson.toString(), JSON))
-                .header("User-Agent", c.userAgent)
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Origin", "https://www.youtube.com")
-                .header("Referer", "https://www.youtube.com/")
-                .header("X-Youtube-Client-Name", c.headerNum)
-                .header("X-Youtube-Client-Version", c.version)
-                .header("Content-Type", "application/json")
-                .build();
-        try (Response resp = client.newCall(req).execute()) {
-            if (!resp.isSuccessful()) {
-                Log.w(TAG, "innertube " + c.name + " HTTP " + resp.code());
-                return null;
-            }
-            ResponseBody rb = resp.body();
-            if (rb == null) return null;
-            String s = rb.string();
-            return s.isEmpty() ? null : s;
-        } catch (IOException e) {
-            Log.w(TAG, "innertube " + c.name + " IO", e);
-            return null;
-        }
-    }
-
-    // -- Caption track download ----------------------------------------------
-
-    /**
-     * Downloads & parses a captions URL. YouTube has been making
-     * {@code fmt=srv3} the default, which produces a different XML layout
-     * than {@link TimedTextParser} expects, so we always try forcing
-     * {@code fmt=srv1} (legacy {@code <text>} format) first when the URL
-     * doesn't explicitly request a format yet.
-     */
     @NonNull
-    private List<SubtitleLine> downloadCaptionTrack(String rawUrl) {
-        if (rawUrl == null || rawUrl.isEmpty()) return Collections.emptyList();
-
-        // YouTube sometimes serves caption baseUrls as schemeless or even
-        // host-relative paths ("/api/timedtext?..."), which OkHttp rejects.
-        String baseUrl = absolutize(rawUrl);
-
+    private List<SubtitleLine> tryFetch(@Nullable String url) {
+        if (url == null || url.isEmpty()) return Collections.emptyList();
+        String body;
         try {
-            // Always try the legacy format we can parse.
-            String forced = forceFmt(baseUrl, "srv1");
-            List<SubtitleLine> lines = parseLogged(simpleGet(forced), "fmt=srv1");
-            if (!lines.isEmpty()) return lines;
-
-            // Some baseUrls reject the override; fall back to whatever the URL
-            // originally requested.
-            if (!forced.equals(baseUrl)) {
-                lines = parseLogged(simpleGet(baseUrl), "original");
-                if (!lines.isEmpty()) return lines;
-            }
-
-            // Last resort: try stripping the format hint entirely.
-            String stripped = stripParam(baseUrl, "fmt");
-            if (!stripped.equals(baseUrl) && !stripped.equals(forced)) {
-                lines = parseLogged(simpleGet(stripped), "no-fmt");
-                if (!lines.isEmpty()) return lines;
-            }
-            return Collections.emptyList();
+            body = simpleGet(url);
         } catch (IllegalArgumentException badUrl) {
             // OkHttp throws this for malformed URLs — swallow so the next
             // tier of the resolver can still run.
-            Log.w(TAG, "download bad URL: " + baseUrl, badUrl);
+            Log.w(TAG, "tryFetch bad URL: " + url, badUrl);
             return Collections.emptyList();
         }
-    }
-
-    /**
-     * Promotes schemeless / host-relative caption URLs to absolute youtube.com
-     * URLs so OkHttp can parse them. Returns the input unchanged if it already
-     * has a scheme.
-     */
-    static String absolutize(String url) {
-        if (url == null || url.isEmpty()) return url;
-        if (url.startsWith("//")) return "https:" + url;
-        if (url.startsWith("/")) return "https://www.youtube.com" + url;
-        return url;
-    }
-
-    /** Replaces {@code &fmt=...} (or appends one) with the supplied value. */
-    private static String forceFmt(String url, String fmt) {
-        String stripped = stripParam(url, "fmt");
-        char joiner = stripped.indexOf('?') < 0 ? '?' : '&';
-        return stripped + joiner + "fmt=" + fmt;
-    }
-
-    private static String stripParam(String url, String name) {
-        int q = url.indexOf('?');
-        if (q < 0) return url;
-        StringBuilder out = new StringBuilder(url.substring(0, q + 1));
-        boolean first = true;
-        for (String pair : url.substring(q + 1).split("&")) {
-            if (pair.isEmpty()) continue;
-            int eq = pair.indexOf('=');
-            String k = eq < 0 ? pair : pair.substring(0, eq);
-            if (k.equals(name)) continue;
-            if (!first) out.append('&');
-            out.append(pair);
-            first = false;
-        }
-        // Drop trailing '?' if no params survived.
-        if (out.charAt(out.length() - 1) == '?') {
-            out.setLength(out.length() - 1);
-        }
-        return out.toString();
-    }
-
-    private static List<SubtitleLine> parse(@Nullable String xml) {
-        if (xml == null) return Collections.emptyList();
-        return TimedTextParser.parse(xml);
-    }
-
-    /**
-     * Parses {@code body} like {@link #parse} but logs a sample of the body
-     * when the parser returns no lines, so we can tell from logcat whether
-     * the server returned an unrecognised format.
-     */
-    private static List<SubtitleLine> parseLogged(@Nullable String body, String label) {
-        if (body == null) {
-            Log.d(TAG, label + " body=null");
-            return Collections.emptyList();
-        }
+        if (body == null) return Collections.emptyList();
         List<SubtitleLine> lines = TimedTextParser.parse(body);
         if (lines.isEmpty()) {
             int len = body.length();
-            String sample = body.substring(0, Math.min(200, len)).replaceAll("\\s+", " ");
-            Log.w(TAG, label + " body=" + len + "B unparsed sample=\"" + sample + "\"");
+            String sample = body.substring(0, Math.min(200, len))
+                    .replaceAll("\\s+", " ");
+            Log.w(TAG, "tryFetch unparsed body=" + len + "B sample=\"" + sample + "\"");
         }
         return lines;
     }
-
-    // -- HTTP helper ----------------------------------------------------------
 
     @Nullable
     private String simpleGet(String url) {
         Request req = new Request.Builder()
                 .url(url)
-                .header("User-Agent", UA_WEB)
+                .header("User-Agent", UA)
                 .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Origin", "https://www.youtube.com")
-                .header("Referer", "https://www.youtube.com/")
                 .build();
         try (Response resp = client.newCall(req).execute()) {
             if (!resp.isSuccessful()) {
@@ -366,10 +141,30 @@ public class YouTubeSubtitleService implements SubtitleService {
         }
     }
 
-    private static String legacyTimedText(String videoId, boolean asr) {
+    /**
+     * Promotes schemeless / host-relative caption URLs to absolute youtube.com
+     * URLs so OkHttp can parse them. Returns the input unchanged if it already
+     * has a scheme.
+     */
+    static String absolutize(String url) {
+        if (url == null || url.isEmpty()) return url;
+        if (url.startsWith("//")) return "https:" + url;
+        if (url.startsWith("/")) return "https://www.youtube.com" + url;
+        return url;
+    }
+
+    private static String describe(@Nullable CaptionsTrackResolver.Track t) {
+        if (t == null) return "null";
+        return "{lang=" + t.languageCode + ", kind=" + t.kind
+                + ", url=" + (t.baseUrl == null ? "null"
+                        : t.baseUrl.substring(0, Math.min(120, t.baseUrl.length())))
+                + "…}";
+    }
+
+    private static String timedTextUrl(String videoId, boolean asr) {
         StringBuilder sb = new StringBuilder("https://www.youtube.com/api/timedtext?lang=en");
         if (asr) sb.append("&kind=asr");
-        sb.append("&v=").append(videoId).append("&fmt=srv1");
+        sb.append("&v=").append(videoId);
         return sb.toString();
     }
 
