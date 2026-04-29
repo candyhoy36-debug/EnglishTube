@@ -8,19 +8,21 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Parses YouTube's timedtext XML format into {@link SubtitleLine}s.
+ * Parses YouTube's timedtext payloads into {@link SubtitleLine}s.
  *
- * Sample input:
- * <pre>
- * &lt;?xml version="1.0" encoding="utf-8" ?&gt;
- * &lt;transcript&gt;
- *   &lt;text start="0" dur="3.5"&gt;Hello world&lt;/text&gt;
- *   &lt;text start="3.5" dur="2.0"&gt;&amp;quot;Sure!&amp;quot;&lt;/text&gt;
- * &lt;/transcript&gt;
- * </pre>
+ * <p>Two on-the-wire formats are accepted:</p>
  *
- * Returns an empty list if the response is empty or malformed (caller decides
- * whether that means "fetch failed" or "no track").
+ * <ul>
+ *   <li><b>srv1 (legacy)</b> — {@code <text start="S" dur="D">body</text>} where
+ *       S/D are seconds. Returned by old endpoints / when the server honours
+ *       {@code fmt=srv1}.</li>
+ *   <li><b>srv3 (current default)</b> — {@code <p t="MS" d="MS">body</p>}
+ *       where t/d are milliseconds. Returned when the server ignores our
+ *       fmt hint, which it does for many newly-signed baseUrls.</li>
+ * </ul>
+ *
+ * Returns an empty list if the response is empty or in an unknown format
+ * (caller decides whether that means "fetch failed" or "no track").
  */
 public final class TimedTextParser {
 
@@ -36,10 +38,35 @@ public final class TimedTextParser {
     private static final Pattern ATTR_DUR = Pattern.compile(
             "\\bdur=\"([0-9]+(?:\\.[0-9]+)?)\"", Pattern.CASE_INSENSITIVE);
 
-    public static List<SubtitleLine> parse(String xml) {
-        List<SubtitleLine> result = new ArrayList<>();
-        if (xml == null || xml.isEmpty()) return result;
+    /** srv3: {@code <p t="ms" d="ms">body</p>}. */
+    private static final Pattern P_TAG = Pattern.compile(
+            "<p\\b([^>]*)>(.*?)</p>",
+            Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern ATTR_T_MS = Pattern.compile(
+            "\\bt=\"([0-9]+)\"", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern ATTR_D_MS = Pattern.compile(
+            "\\bd=\"([0-9]+)\"", Pattern.CASE_INSENSITIVE);
+
+    /** srv3 inline word-level segment. We strip these to a flat text string. */
+    private static final Pattern S_TAG = Pattern.compile(
+            "<s\\b[^>]*>(.*?)</s>",
+            Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+
+    public static List<SubtitleLine> parse(String xml) {
+        if (xml == null || xml.isEmpty()) return new ArrayList<>();
+
+        // Try srv1 first — it's what `fmt=srv1` is supposed to give us.
+        List<SubtitleLine> srv1 = parseSrv1(xml);
+        if (!srv1.isEmpty()) return srv1;
+
+        // Fall back to srv3 (current YouTube default).
+        return parseSrv3(xml);
+    }
+
+    private static List<SubtitleLine> parseSrv1(String xml) {
+        List<SubtitleLine> result = new ArrayList<>();
         Matcher tag = TEXT_TAG.matcher(xml);
         while (tag.find()) {
             String attrs = tag.group(1);
@@ -57,6 +84,38 @@ public final class TimedTextParser {
             result.add(new SubtitleLine(startMs, endMs, text));
         }
         return result;
+    }
+
+    private static List<SubtitleLine> parseSrv3(String xml) {
+        List<SubtitleLine> result = new ArrayList<>();
+        Matcher tag = P_TAG.matcher(xml);
+        while (tag.find()) {
+            String attrs = tag.group(1);
+            String body = tag.group(2);
+
+            long startMs = parseLong(ATTR_T_MS, attrs);
+            long durMs = parseLong(ATTR_D_MS, attrs);
+            if (startMs < 0 || durMs <= 0) continue;
+
+            // srv3 wraps segments in <s>; pull their inner text out before decoding.
+            String flattened = S_TAG.matcher(body).replaceAll("$1");
+            String text = decode(flattened);
+            if (text.isEmpty()) continue;
+
+            result.add(new SubtitleLine(startMs, startMs + durMs, text));
+        }
+        return result;
+    }
+
+    private static long parseLong(Pattern p, String attrs) {
+        if (attrs == null) return -1L;
+        Matcher m = p.matcher(attrs);
+        if (!m.find()) return -1L;
+        try {
+            return Long.parseLong(m.group(1));
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
     }
 
     private static float parseFloat(Pattern p, String attrs) {
