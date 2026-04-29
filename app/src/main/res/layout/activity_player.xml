@@ -2,17 +2,20 @@
 <!--
     Sprint 2 player layout.
 
-    Default state: the WebView fills the full content area below the
-    toolbar so the user sees the YouTube mobile page exactly as it
-    would normally render — video at top, description, related videos
-    underneath, scrollable.
+    Top: a thin auxiliary action bar with four toggle buttons —
+        Ghép câu · Lặp dòng · Bookmark · A↔a (EN/VI/Cả hai).
+        This replaces the old MaterialToolbar so we get more
+        screen real estate; back navigation falls back to the
+        Android system gesture / hardware key.
 
-    Toggled state: tapping the FAB slides the subtitle panel UP. The
-    panel is anchored just below the video frame (a Space view sized
-    to a 16:9 ratio against the WebView width gives us that anchor),
-    so the &lt;video&gt; element stays fully visible while the
-    description / related-videos area below it gets covered by the
-    subtitle list.
+    Middle: the WebView fills the rest of the content area and
+        renders the YouTube mobile page exactly as it would on
+        the device's browser.
+
+    Bottom (overlay, toggled by FAB): the subtitle panel slides up
+        and is anchored under the actual <video> element via the
+        JS bridge's onVideoBottom() callback so the player chrome
+        (progress bar, fullscreen button, etc) stays visible.
 -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -20,19 +23,96 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background">
+    android:background="@color/background"
+    android:fitsSystemWindows="true">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
+    <!-- Auxiliary action bar (replaces MaterialToolbar). -->
+    <LinearLayout
+        android:id="@+id/player_action_bar"
         android:layout_width="0dp"
-        android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary"
-        android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar"
+        android:layout_height="wrap_content"
+        android:background="@color/player_action_bar_bg"
+        android:elevation="2dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="6dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:navigationIcon="@drawable/ic_arrow_back"
-        app:title="@string/title_player" />
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/btn_combine_lines"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_link"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/action_combine_lines"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/btn_loop_line"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_loop"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/action_loop_line"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/btn_bookmark_line"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_bookmark"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/action_bookmark_line"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/btn_lang_mode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_translate"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/lang_mode_en"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
+    </LinearLayout>
 
     <ProgressBar
         android:id="@+id/web_progress"
@@ -41,11 +121,10 @@
         android:layout_height="3dp"
         android:max="100"
         android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/toolbar"
+        app:layout_constraintTop_toBottomOf="@id/player_action_bar"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Full-screen WebView: shows YouTube exactly like the mobile site. -->
     <WebView
         android:id="@+id/webview_player"
         android:layout_width="0dp"
@@ -61,10 +140,10 @@
         sees the YouTube page below the video at first. The FAB
         toggles this on/off.
 
-        The top margin is updated at runtime by PlayerActivity when the
-        JS bridge reports the &lt;video&gt; element's actual bottom edge.
-        The 280dp default just covers the common case so we have a
-        sensible starting position before the first JS tick.
+        Top margin is updated at runtime by PlayerActivity when the
+        JS bridge reports the &lt;video&gt; element's actual bottom
+        edge. The 280dp default just covers the common case so we
+        have a sensible starting position before the first JS tick.
     -->
     <LinearLayout
         android:id="@+id/subtitle_panel"

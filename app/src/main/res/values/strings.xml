@@ -33,4 +33,17 @@
     <!-- Subtitle bottom sheet -->
     <string name="subtitle_panel_title">Phụ đề</string>
     <string name="fab_subtitles_description">Bật/tắt bảng phụ đề</string>
+
+    <!-- Player auxiliary action bar -->
+    <string name="action_combine_lines">Ghép câu</string>
+    <string name="action_loop_line">Lặp dòng</string>
+    <string name="action_bookmark_line">Bookmark</string>
+    <string name="lang_mode_en">EN</string>
+    <string name="lang_mode_vi">VI</string>
+    <string name="lang_mode_both">EN+VI</string>
+    <string name="loop_on_no_active">Chọn 1 dòng trước khi bật lặp dòng.</string>
+    <string name="bookmark_no_active">Chưa có dòng phụ đề nào đang phát.</string>
+    <string name="bookmark_saved">Đã bookmark dòng này.</string>
+    <string name="combine_not_yet">Tính năng ghép câu sẽ có ở Sprint 4.</string>
+    <string name="lang_mode_not_yet">Chế độ song ngữ sẽ có ở Sprint 4.</string>
 </resources>

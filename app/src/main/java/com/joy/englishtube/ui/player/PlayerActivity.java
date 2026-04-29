@@ -27,12 +27,13 @@ import androidx.lifecycle.Lifecycle;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.joy.englishtube.EnglishTubeApp;
 import com.joy.englishtube.R;
+import com.joy.englishtube.data.BookmarkDao;
+import com.joy.englishtube.data.BookmarkEntity;
 import com.joy.englishtube.data.SubtitleCacheDao;
 import com.joy.englishtube.data.SubtitleCacheEntity;
 import com.joy.englishtube.model.SubtitleLine;
@@ -88,6 +89,13 @@ public class PlayerActivity extends AppCompatActivity
     private ProgressBar webProgress;
     private FloatingActionButton fabSubtitles;
 
+    // Auxiliary action bar buttons (top of activity, replaces the
+    // old MaterialToolbar).
+    private TextView btnCombineLines;
+    private TextView btnLoopLine;
+    private TextView btnBookmarkLine;
+    private TextView btnLangMode;
+
     // Inline split-layout subtitle panel (Sprint 2 UI revamp — the
     // panel sits below the video instead of overlaying it via a
     // BottomSheetDialog).
@@ -98,6 +106,15 @@ public class PlayerActivity extends AppCompatActivity
     private View bannerNoSubtitle;
     private TextView bannerMessage;
     private Button btnRetryFetch;
+
+    // --- Auxiliary feature state ---
+    private int activeLineIndex = -1;
+    private boolean loopLineEnabled = false;
+    private long loopStartMs = -1L;
+    private long loopEndMs = -1L;
+    private LangMode langMode = LangMode.EN;
+
+    private enum LangMode { EN, VI, BOTH }
 
     private final PlayerSyncController syncController = new PlayerSyncControllerImpl();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -121,14 +138,11 @@ public class PlayerActivity extends AppCompatActivity
             return;
         }
 
-        MaterialToolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-        toolbar.setNavigationOnClickListener(v -> finish());
-
         webView = findViewById(R.id.webview_player);
         webProgress = findViewById(R.id.web_progress);
         fabSubtitles = findViewById(R.id.fab_subtitles);
 
+        bindActionBar();
         bindSubtitlePanel();
         configureWebView();
         webView.loadUrl("https://m.youtube.com/watch?v=" + videoId);
@@ -138,6 +152,29 @@ public class PlayerActivity extends AppCompatActivity
         syncController.setListener(this::onActiveLineChanged);
         applyStateToSheet();
         loadSubtitlesAsync(videoId);
+    }
+
+    /**
+     * Wire up the four buttons of the auxiliary action bar that sits at the
+     * top of the activity (replacing the old toolbar). Loop and Bookmark
+     * have real behaviour wired in this sprint; Combine and Lang are UI
+     * stubs that announce when the underlying feature lands.
+     */
+    private void bindActionBar() {
+        btnCombineLines = findViewById(R.id.btn_combine_lines);
+        btnLoopLine = findViewById(R.id.btn_loop_line);
+        btnBookmarkLine = findViewById(R.id.btn_bookmark_line);
+        btnLangMode = findViewById(R.id.btn_lang_mode);
+
+        btnCombineLines.setOnClickListener(v ->
+                Toast.makeText(this, R.string.combine_not_yet, Toast.LENGTH_SHORT).show());
+
+        btnLoopLine.setOnClickListener(v -> toggleLoopLine());
+
+        btnBookmarkLine.setOnClickListener(v -> bookmarkActiveLine());
+
+        btnLangMode.setOnClickListener(v -> cycleLangMode());
+        applyLangMode();
     }
 
     /**
@@ -157,8 +194,16 @@ public class PlayerActivity extends AppCompatActivity
         layoutManager = new LinearLayoutManager(this);
         rv.setLayoutManager(layoutManager);
         rv.setAdapter(adapter);
-        adapter.setOnLineClickListener((position, line) ->
-                WebViewPlayerBridge.seekTo(webView, line.startMs / 1000.0));
+        adapter.setOnLineClickListener((position, line) -> {
+            // Tapping a line seeks the video AND — if loop-line is on —
+            // moves the loop scope to the newly tapped line so the user
+            // can re-anchor the loop without first turning it off.
+            WebViewPlayerBridge.seekTo(webView, line.startMs / 1000.0);
+            if (loopLineEnabled) {
+                loopStartMs = line.startMs;
+                loopEndMs = line.endMs;
+            }
+        });
 
         btnRetryFetch.setOnClickListener(v -> {
             state = SubtitleState.LOADING;
@@ -230,6 +275,14 @@ public class PlayerActivity extends AppCompatActivity
      * the polling JS bridge (SPA transitions on m.youtube.com that don't fire
      * a full page load).
      */
+    private void resetAuxiliaryStateForNewVideo() {
+        activeLineIndex = -1;
+        loopLineEnabled = false;
+        loopStartMs = -1L;
+        loopEndMs = -1L;
+        if (btnLoopLine != null) btnLoopLine.setSelected(false);
+    }
+
     private void handleNavigation(@Nullable String url) {
         String newId = extractVideoId(url);
         if (newId == null) return;
@@ -240,6 +293,7 @@ public class PlayerActivity extends AppCompatActivity
         latestLines = Collections.emptyList();
         state = SubtitleState.LOADING;
         syncController.attach(Collections.emptyList());
+        resetAuxiliaryStateForNewVideo();
         applyStateToSheet();
         loadSubtitlesAsync(newId);
     }
@@ -325,11 +379,21 @@ public class PlayerActivity extends AppCompatActivity
 
     @Override
     public void onTime(float seconds) {
+        long currentMs = (long) (seconds * 1000f);
+
+        // Loop-line: if armed and we've passed the end of the looped cue,
+        // seek back to its start. Done before the throttle so we don't
+        // miss a window.
+        if (loopLineEnabled && loopEndMs > 0 && currentMs > loopEndMs) {
+            WebViewPlayerBridge.seekTo(webView, loopStartMs / 1000.0);
+            return;
+        }
+
         long nowMs = System.currentTimeMillis();
         if (nowMs - lastTickMs < ACTIVE_LINE_TICK_MS) return;
         lastTickMs = nowMs;
         try {
-            syncController.onTick((long) (seconds * 1000f));
+            syncController.onTick(currentMs);
         } catch (RuntimeException e) {
             Log.w(TAG, "sync onTick failed", e);
         }
@@ -356,6 +420,7 @@ public class PlayerActivity extends AppCompatActivity
     }
 
     private void onActiveLineChanged(int newIndex) {
+        activeLineIndex = newIndex;
         if (adapter == null || layoutManager == null) return;
         adapter.setActiveIndex(newIndex);
         if (newIndex < 0) return;
@@ -364,6 +429,95 @@ public class PlayerActivity extends AppCompatActivity
         CenterSmoothScroller scroller = new CenterSmoothScroller(this);
         scroller.setTargetPosition(newIndex);
         layoutManager.startSmoothScroll(scroller);
+    }
+
+    // --- Auxiliary action bar handlers --------------------------------------
+
+    private void toggleLoopLine() {
+        if (!loopLineEnabled) {
+            SubtitleLine line = currentActiveLine();
+            if (line == null) {
+                Toast.makeText(this, R.string.loop_on_no_active, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            loopStartMs = line.startMs;
+            loopEndMs = line.endMs;
+            loopLineEnabled = true;
+        } else {
+            loopLineEnabled = false;
+            loopStartMs = -1L;
+            loopEndMs = -1L;
+        }
+        if (btnLoopLine != null) btnLoopLine.setSelected(loopLineEnabled);
+    }
+
+    private void bookmarkActiveLine() {
+        SubtitleLine line = currentActiveLine();
+        if (line == null || videoId == null) {
+            Toast.makeText(this, R.string.bookmark_no_active, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        BookmarkEntity entity = new BookmarkEntity();
+        entity.videoId = videoId;
+        entity.startMs = line.startMs;
+        entity.endMs = line.endMs;
+        entity.textEn = line.textEn != null ? line.textEn : "";
+        entity.createdAt = System.currentTimeMillis();
+        final String capturedVideo = videoId;
+        io.execute(() -> {
+            try {
+                BookmarkDao dao = EnglishTubeApp.get().getDatabase().bookmarkDao();
+                dao.insert(entity);
+                runOnUiThread(() -> Toast.makeText(this, R.string.bookmark_saved,
+                        Toast.LENGTH_SHORT).show());
+            } catch (RuntimeException e) {
+                Log.w(TAG, "bookmark insert failed for " + capturedVideo, e);
+            }
+        });
+    }
+
+    private void cycleLangMode() {
+        switch (langMode) {
+            case EN:
+                langMode = LangMode.VI;
+                break;
+            case VI:
+                langMode = LangMode.BOTH;
+                break;
+            case BOTH:
+            default:
+                langMode = LangMode.EN;
+                break;
+        }
+        applyLangMode();
+        if (langMode != LangMode.EN) {
+            Toast.makeText(this, R.string.lang_mode_not_yet, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void applyLangMode() {
+        if (btnLangMode == null) return;
+        int labelRes;
+        switch (langMode) {
+            case VI:
+                labelRes = R.string.lang_mode_vi;
+                break;
+            case BOTH:
+                labelRes = R.string.lang_mode_both;
+                break;
+            case EN:
+            default:
+                labelRes = R.string.lang_mode_en;
+                break;
+        }
+        btnLangMode.setText(labelRes);
+        btnLangMode.setSelected(langMode != LangMode.EN);
+    }
+
+    @Nullable
+    private SubtitleLine currentActiveLine() {
+        if (activeLineIndex < 0 || activeLineIndex >= latestLines.size()) return null;
+        return latestLines.get(activeLineIndex);
     }
 
     // --- Subtitle fetch ------------------------------------------------------

@@ -21,4 +21,7 @@
 
     <color name="background">#FFFAFAFA</color>
     <color name="divider">#FFE0E0E0</color>
+
+    <color name="player_action_bar_bg">#FFFFFFFF</color>
+    <color name="player_action_active_bg">#1F1976D2</color>
 </resources>
