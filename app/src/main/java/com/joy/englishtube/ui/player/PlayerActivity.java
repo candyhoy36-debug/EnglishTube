@@ -210,6 +210,22 @@ public class PlayerActivity extends AppCompatActivity
             applyStateToSheet();
             if (videoId != null) loadSubtitlesAsync(videoId);
         });
+
+        // Stub buttons in the subtitle-panel action row. Real implementations
+        // land in later sprints — for now each just toasts the planned ETA so
+        // the user sees the row reacts.
+        findViewById(R.id.btn_search_subtitle).setOnClickListener(v ->
+                Toast.makeText(this, R.string.search_subtitle_not_yet,
+                        Toast.LENGTH_SHORT).show());
+        findViewById(R.id.btn_playback_speed).setOnClickListener(v ->
+                Toast.makeText(this, R.string.playback_speed_not_yet,
+                        Toast.LENGTH_SHORT).show());
+        findViewById(R.id.btn_text_size).setOnClickListener(v ->
+                Toast.makeText(this, R.string.text_size_not_yet,
+                        Toast.LENGTH_SHORT).show());
+        findViewById(R.id.btn_download_srt).setOnClickListener(v ->
+                Toast.makeText(this, R.string.download_srt_not_yet,
+                        Toast.LENGTH_SHORT).show());
     }
 
     /** Toggle the inline subtitle panel — user wants to focus on the video. */
