@@ -32,5 +32,5 @@
 
     <!-- Subtitle bottom sheet -->
     <string name="subtitle_panel_title">Phụ đề</string>
-    <string name="fab_subtitles_description">Mở danh sách phụ đề</string>
+    <string name="fab_subtitles_description">Bật/tắt bảng phụ đề</string>
 </resources>

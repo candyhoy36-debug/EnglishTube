@@ -27,7 +27,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.appbar.MaterialToolbar;
-import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -50,14 +49,20 @@ import java.util.concurrent.Executors;
 import okhttp3.OkHttpClient;
 
 /**
- * Sprint 2 (architecture pivot): host the YouTube mobile web page in a
- * WebView so we can play any video — including those whose owner has disabled
- * the IFrame embed. Our subtitle UI is overlaid via a Material bottom sheet
- * triggered by a FloatingActionButton; time sync between the &lt;video&gt; and
- * the subtitle list is handled by {@link WebViewPlayerBridge}.
+ * Sprint 2: host the YouTube mobile web page in a WebView so we can play
+ * any video — including those whose owner has disabled the IFrame embed.
  *
- * Sprint 5 will reuse this same WebView to render the bilingual overlay when
- * the user goes fullscreen + landscape.
+ * Layout split (portrait):
+ *   • Top — 16:9 video frame (the WebView).
+ *   • Bottom — inline subtitle panel anchored under the video so the user
+ *     can read the subtitles without occluding the picture.
+ *
+ * The FAB toggles the subtitle panel on/off (so the user can fall back to
+ * a video-only view). Time sync between the &lt;video&gt; element and the
+ * subtitle list is handled by {@link WebViewPlayerBridge}.
+ *
+ * Sprint 5 will reuse this same WebView to render the bilingual overlay
+ * when the user goes fullscreen + landscape.
  */
 public class PlayerActivity extends AppCompatActivity
         implements WebViewPlayerBridge.Callback {
@@ -82,14 +87,16 @@ public class PlayerActivity extends AppCompatActivity
     private ProgressBar webProgress;
     private FloatingActionButton fabSubtitles;
 
-    // Bottom-sheet-owned views; nullable when the sheet has not been shown yet.
-    @Nullable private BottomSheetDialog subtitleSheet;
-    @Nullable private SubtitleAdapter adapter;
-    @Nullable private LinearLayoutManager layoutManager;
-    @Nullable private ProgressBar subtitleProgress;
-    @Nullable private View bannerNoSubtitle;
-    @Nullable private TextView bannerMessage;
-    @Nullable private Button btnRetryFetch;
+    // Inline split-layout subtitle panel (Sprint 2 UI revamp — the
+    // panel sits below the video instead of overlaying it via a
+    // BottomSheetDialog).
+    private View subtitlePanel;
+    private SubtitleAdapter adapter;
+    private LinearLayoutManager layoutManager;
+    private ProgressBar subtitleProgress;
+    private View bannerNoSubtitle;
+    private TextView bannerMessage;
+    private Button btnRetryFetch;
 
     private final PlayerSyncController syncController = new PlayerSyncControllerImpl();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -121,13 +128,49 @@ public class PlayerActivity extends AppCompatActivity
         webProgress = findViewById(R.id.web_progress);
         fabSubtitles = findViewById(R.id.fab_subtitles);
 
+        bindSubtitlePanel();
         configureWebView();
         webView.loadUrl("https://m.youtube.com/watch?v=" + videoId);
 
-        fabSubtitles.setOnClickListener(v -> showSubtitleSheet());
+        fabSubtitles.setOnClickListener(v -> toggleSubtitlePanel());
 
         syncController.setListener(this::onActiveLineChanged);
+        applyStateToSheet();
         loadSubtitlesAsync(videoId);
+    }
+
+    /**
+     * Wire up the inline subtitle panel that lives directly under the video
+     * frame. Replaces the old BottomSheetDialog flow — see the activity
+     * layout for the visual split.
+     */
+    private void bindSubtitlePanel() {
+        subtitlePanel = findViewById(R.id.subtitle_panel);
+        subtitleProgress = findViewById(R.id.subtitle_progress);
+        bannerNoSubtitle = findViewById(R.id.banner_no_subtitle);
+        bannerMessage = findViewById(R.id.tv_banner_message);
+        btnRetryFetch = findViewById(R.id.btn_retry_fetch);
+
+        RecyclerView rv = findViewById(R.id.recycler_subtitles);
+        adapter = new SubtitleAdapter();
+        layoutManager = new LinearLayoutManager(this);
+        rv.setLayoutManager(layoutManager);
+        rv.setAdapter(adapter);
+        adapter.setOnLineClickListener((position, line) ->
+                WebViewPlayerBridge.seekTo(webView, line.startMs / 1000.0));
+
+        btnRetryFetch.setOnClickListener(v -> {
+            state = SubtitleState.LOADING;
+            applyStateToSheet();
+            if (videoId != null) loadSubtitlesAsync(videoId);
+        });
+    }
+
+    /** Toggle the inline subtitle panel — user wants to focus on the video. */
+    private void toggleSubtitlePanel() {
+        if (subtitlePanel == null) return;
+        boolean nowVisible = subtitlePanel.getVisibility() != View.VISIBLE;
+        subtitlePanel.setVisibility(nowVisible ? View.VISIBLE : View.GONE);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -233,44 +276,9 @@ public class PlayerActivity extends AppCompatActivity
         }
     }
 
-    // --- Subtitle bottom sheet ----------------------------------------------
+    // --- Inline subtitle panel state machine --------------------------------
 
-    private void showSubtitleSheet() {
-        if (subtitleSheet == null) buildSubtitleSheet();
-        // Re-apply current state so the sheet opens with the right view.
-        applyStateToSheet();
-        if (subtitleSheet != null) subtitleSheet.show();
-    }
-
-    private void buildSubtitleSheet() {
-        BottomSheetDialog dialog = new BottomSheetDialog(this);
-        View content = getLayoutInflater().inflate(R.layout.sheet_subtitle_panel, null);
-        dialog.setContentView(content);
-
-        RecyclerView rv = content.findViewById(R.id.recycler_subtitles);
-        subtitleProgress = content.findViewById(R.id.subtitle_progress);
-        bannerNoSubtitle = content.findViewById(R.id.banner_no_subtitle);
-        bannerMessage = content.findViewById(R.id.tv_banner_message);
-        btnRetryFetch = content.findViewById(R.id.btn_retry_fetch);
-
-        adapter = new SubtitleAdapter();
-        layoutManager = new LinearLayoutManager(this);
-        rv.setLayoutManager(layoutManager);
-        rv.setAdapter(adapter);
-        adapter.setOnLineClickListener((position, line) -> {
-            WebViewPlayerBridge.seekTo(webView, line.startMs / 1000.0);
-        });
-
-        btnRetryFetch.setOnClickListener(v -> {
-            state = SubtitleState.LOADING;
-            applyStateToSheet();
-            if (videoId != null) loadSubtitlesAsync(videoId);
-        });
-
-        subtitleSheet = dialog;
-    }
-
-    /** Pushes the current {@link #state} onto whatever sheet views exist. */
+    /** Pushes the current {@link #state} onto the inline panel views. */
     private void applyStateToSheet() {
         if (adapter == null || subtitleProgress == null
                 || bannerNoSubtitle == null || bannerMessage == null
@@ -406,10 +414,12 @@ public class PlayerActivity extends AppCompatActivity
         syncController.attach(Collections.emptyList());
         applyStateToSheet();
 
-        // Also surface the choice dialog the SRS demands the first time we
-        // hit a fetch failure. The user can come back to "Retry" from the
-        // banner inside the sheet later.
-        if (subtitleSheet == null || !subtitleSheet.isShowing()) {
+        // Surface the choice dialog the SRS demands. The inline panel
+        // already shows the retry banner; the dialog adds the upload-SRT
+        // and watch-only options. We only show it once — if the panel is
+        // hidden the dialog still pops, but if the user has already chosen
+        // to keep the banner from a previous fetch fail we don't nag.
+        if (subtitlePanel == null || subtitlePanel.getVisibility() != View.VISIBLE) {
             new AlertDialog.Builder(this)
                     .setTitle(R.string.fetch_failed_title)
                     .setMessage(R.string.fetch_failed_message)
@@ -474,10 +484,6 @@ public class PlayerActivity extends AppCompatActivity
     protected void onDestroy() {
         syncController.detach();
         io.shutdownNow();
-        if (subtitleSheet != null) {
-            subtitleSheet.dismiss();
-            subtitleSheet = null;
-        }
         if (webView != null) {
             webView.removeJavascriptInterface(WebViewPlayerBridge.NAME);
             webView.stopLoading();
