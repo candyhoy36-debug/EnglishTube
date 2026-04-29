@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -337,6 +338,21 @@ public class PlayerActivity extends AppCompatActivity
     @Override
     public void onLocation(@NonNull String url) {
         handleNavigation(url);
+    }
+
+    @Override
+    public void onVideoBottom(float cssPx) {
+        if (subtitlePanel == null) return;
+        // CSS pixels in WebView correspond 1:1 to dp, so multiply by the
+        // display density to get layout pixels for the constraint margin.
+        float density = getResources().getDisplayMetrics().density;
+        int marginPx = Math.max(0, Math.round(cssPx * density));
+        ViewGroup.MarginLayoutParams lp =
+                (ViewGroup.MarginLayoutParams) subtitlePanel.getLayoutParams();
+        if (lp.topMargin != marginPx) {
+            lp.topMargin = marginPx;
+            subtitlePanel.setLayoutParams(lp);
+        }
     }
 
     private void onActiveLineChanged(int newIndex) {

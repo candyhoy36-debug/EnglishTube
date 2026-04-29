@@ -38,6 +38,15 @@ public class WebViewPlayerBridge {
          * {@code WebViewClient.onPageFinished} silent.
          */
         @UiThread void onLocation(@NonNull String url);
+
+        /**
+         * Reports the bottom edge (in CSS pixels relative to the WebView
+         * viewport) of the &lt;video&gt; element. Lets the native side anchor
+         * the subtitle panel exactly under the video frame regardless of
+         * how the YouTube page chrome (header, comments, suggestions)
+         * is laid out around it.
+         */
+        @UiThread void onVideoBottom(float cssPx);
     }
 
     /** Name exposed to JS — referenced by {@link #JS_INSTALL}. */
@@ -59,6 +68,7 @@ public class WebViewPlayerBridge {
             + "  var lastTime = -1;"
             + "  var notifiedReady = false;"
             + "  var lastHref = location.href;"
+            + "  var lastBottom = -1;"
             + "  if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onLocation) {"
             + "    window." + "NAME_PLACEHOLDER" + ".onLocation(lastHref);"
             + "  }"
@@ -69,6 +79,7 @@ public class WebViewPlayerBridge {
             + "        lastHref = href;"
             + "        notifiedReady = false;"
             + "        lastTime = -1;"
+            + "        lastBottom = -1;"
             + "        if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onLocation) {"
             + "          window." + "NAME_PLACEHOLDER" + ".onLocation(href);"
             + "        }"
@@ -79,6 +90,16 @@ public class WebViewPlayerBridge {
             + "        notifiedReady = true;"
             + "        if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onReady) {"
             + "          window." + "NAME_PLACEHOLDER" + ".onReady();"
+            + "        }"
+            + "      }"
+            + "      var rect = v.getBoundingClientRect();"
+            + "      if (rect && rect.bottom > 0) {"
+            + "        var b = rect.bottom;"
+            + "        if (Math.abs(b - lastBottom) > 0.5) {"
+            + "          lastBottom = b;"
+            + "          if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onVideoBottom) {"
+            + "            window." + "NAME_PLACEHOLDER" + ".onVideoBottom(b);"
+            + "          }"
             + "        }"
             + "      }"
             + "      var t = v.currentTime;"
@@ -145,5 +166,11 @@ public class WebViewPlayerBridge {
         // hopping onto the main looper.
         final String captured = url;
         main.post(() -> callback.onLocation(captured));
+    }
+
+    @JavascriptInterface
+    @WorkerThread
+    public void onVideoBottom(float cssPx) {
+        main.post(() -> callback.onVideoBottom(cssPx));
     }
 }

@@ -57,36 +57,26 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
     <!--
-        Invisible 16:9 anchor. Width follows the WebView width; height
-        is whatever 16:9 demands. Used purely so the subtitle panel
-        below knows where the video frame ends inside the WebView.
-        Drawing is suppressed (visibility=invisible keeps the layout
-        slot but never paints).
-    -->
-    <Space
-        android:id="@+id/video_anchor"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        app:layout_constraintTop_toBottomOf="@id/web_progress"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintDimensionRatio="H,16:9" />
-
-    <!--
         Slide-up subtitle panel. Default visibility=gone so the user
         sees the YouTube page below the video at first. The FAB
         toggles this on/off.
+
+        The top margin is updated at runtime by PlayerActivity when the
+        JS bridge reports the &lt;video&gt; element's actual bottom edge.
+        The 280dp default just covers the common case so we have a
+        sensible starting position before the first JS tick.
     -->
     <LinearLayout
         android:id="@+id/subtitle_panel"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:layout_marginTop="280dp"
         android:orientation="vertical"
         android:background="@color/background"
         android:elevation="6dp"
         android:visibility="gone"
         tools:visibility="visible"
-        app:layout_constraintTop_toBottomOf="@id/video_anchor"
+        app:layout_constraintTop_toTopOf="@id/webview_player"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
