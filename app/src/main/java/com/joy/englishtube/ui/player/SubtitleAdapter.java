@@ -77,10 +77,17 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
         }
 
         boolean active = position == activeIndex;
-        h.itemView.setBackgroundColor(active
-                ? ContextCompat.getColor(h.itemView.getContext(), R.color.subtitle_active_bg)
-                : 0x00000000);
-        h.en.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
+        if (active) {
+            h.itemView.setBackgroundResource(R.drawable.bg_subtitle_item_active);
+            h.en.setTextColor(ContextCompat.getColor(h.itemView.getContext(),
+                    R.color.brand_primary_dark));
+            h.en.setTypeface(null, Typeface.BOLD);
+        } else {
+            h.itemView.setBackgroundColor(0x00000000);
+            h.en.setTextColor(ContextCompat.getColor(h.itemView.getContext(),
+                    R.color.text_primary));
+            h.en.setTypeface(null, Typeface.NORMAL);
+        }
 
         h.itemView.setOnClickListener(v -> {
             if (clickListener != null) clickListener.onLineClick(h.getBindingAdapterPosition(), line);

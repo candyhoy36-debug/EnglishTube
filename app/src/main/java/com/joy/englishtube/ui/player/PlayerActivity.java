@@ -442,7 +442,9 @@ public class PlayerActivity extends AppCompatActivity
         if (newIndex < 0) return;
         if (!getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) return;
 
-        CenterSmoothScroller scroller = new CenterSmoothScroller(this);
+        // Pin the active line to the top of the panel so the user gets a
+        // preview area below for the upcoming cues.
+        TopSmoothScroller scroller = new TopSmoothScroller(this);
         scroller.setTargetPosition(newIndex);
         layoutManager.startSmoothScroll(scroller);
     }
