@@ -8,6 +8,11 @@ import androidx.annotation.Nullable;
 import com.joy.englishtube.model.SubtitleLine;
 import com.joy.englishtube.service.SubtitleService;
 
+import org.schabi.newpipe.extractor.MediaFormat;
+import org.schabi.newpipe.extractor.ServiceList;
+import org.schabi.newpipe.extractor.stream.StreamExtractor;
+import org.schabi.newpipe.extractor.stream.SubtitlesStream;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
@@ -18,26 +23,35 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * 3-tier fallback fetcher per SRS R-01:
+ * Multi-tier subtitle fetcher (SRS R-01).
+ *
  * <ol>
- *   <li>{@code timedtext?lang=en&v=ID} (manual EN)</li>
- *   <li>{@code timedtext?lang=en&kind=asr&v=ID} (auto-generated EN)</li>
- *   <li>Parse the watch HTML page for {@code playerCaptionsTracklistRenderer},
- *       then GET the resolved baseUrl. The baseUrl returned by YouTube is
- *       sometimes host-relative ({@code /api/timedtext?...}) which OkHttp
- *       refuses to parse, so we run it through {@link #absolutize(String)}
- *       first.</li>
+ *   <li><b>NewPipeExtractor</b> — primary path. Wraps the same library
+ *       NewPipe uses to scrape YouTube; it solves signature ciphers and
+ *       PoToken handshakes that we'd otherwise have to maintain ourselves.
+ *       Subtitles come back as a list of {@link SubtitlesStream}; we pick
+ *       the best English VTT track and parse it with {@link VttParser}.</li>
+ *   <li>{@code timedtext?lang=en&v=ID} (manual EN, legacy fallback)</li>
+ *   <li>{@code timedtext?lang=en&kind=asr&v=ID} (auto-generated EN, legacy
+ *       fallback)</li>
+ *   <li>Watch-page HTML scrape — parses
+ *       {@code playerCaptionsTracklistRenderer} from the inline
+ *       {@code ytInitialPlayerResponse} blob and downloads the discovered
+ *       baseUrl. The baseUrl is sometimes host-relative
+ *       ({@code /api/timedtext?...}), so {@link #absolutize(String)} runs
+ *       on every URL before OkHttp parses it.</li>
  * </ol>
  *
- * Throws {@link SubtitleUnavailableException} only when step 3 confirms there
- * is no English caption track at all. Throws {@link FetchFailedException} if
- * a track exists but every download attempt produces empty/unparseable body —
- * the caller (PlayerActivity) then prompts the user to upload an SRT
- * (SRS §1.5).
+ * <p>Throws {@link SubtitleUnavailableException} only when every resolver
+ * agrees the video has no English caption track. Throws
+ * {@link FetchFailedException} when a track is found but every download
+ * attempt produces empty/unparseable bodies — the caller (PlayerActivity)
+ * then prompts the user to upload an SRT (SRS §1.5).</p>
  *
- * <p>{@link TimedTextParser} understands both the legacy {@code <text>} format
- * ({@code fmt=srv1}) and the current {@code <p>} format ({@code fmt=srv3}),
- * so we never explicitly request a format — whatever YouTube serves will be
+ * <p>{@link TimedTextParser} understands both the legacy {@code <text>}
+ * format ({@code fmt=srv1}) and the current {@code <p>} format
+ * ({@code fmt=srv3}); {@link VttParser} understands WebVTT. We never
+ * explicitly request a format — whatever the upstream serves will be
  * parsed.</p>
  */
 public class YouTubeSubtitleService implements SubtitleService {
@@ -60,44 +74,143 @@ public class YouTubeSubtitleService implements SubtitleService {
             throws SubtitleUnavailableException, FetchFailedException {
 
         Log.d(TAG, "fetch start videoId=" + videoId);
+        boolean trackSeen = false;
 
-        // Tier 1: manual EN
-        List<SubtitleLine> lines = tryFetch(timedTextUrl(videoId, false));
+        // ---- Tier 0: NewPipeExtractor -------------------------------------
+        try {
+            List<SubtitleLine> lines = fetchViaNewPipe(videoId);
+            Log.d(TAG, "tier0 newpipe lines=" + lines.size());
+            if (!lines.isEmpty()) return lines;
+            // NewPipe returned an empty cue list for a track that does exist
+            // — record so we surface FetchFailed instead of Unavailable.
+            trackSeen |= newPipeReportedTrack(videoId);
+        } catch (Exception e) {
+            // NewPipe throws a deep exception hierarchy (ExtractionException,
+            // ParsingException, ReCaptchaException, IOException, …). We log
+            // and fall through to the legacy tiers — there's no value in
+            // letting a NewPipe failure short-circuit the user.
+            Log.w(TAG, "tier0 newpipe failed: " + e.getClass().getSimpleName()
+                    + ": " + e.getMessage());
+        }
+
+        // ---- Tier 1: legacy direct manual EN ------------------------------
+        List<SubtitleLine> lines = tryFetchLegacy(timedTextUrl(videoId, false));
         Log.d(TAG, "tier1 lines=" + lines.size());
         if (!lines.isEmpty()) return lines;
 
-        // Tier 2: auto EN
-        lines = tryFetch(timedTextUrl(videoId, true));
+        // ---- Tier 2: legacy direct auto EN --------------------------------
+        lines = tryFetchLegacy(timedTextUrl(videoId, true));
         Log.d(TAG, "tier2 lines=" + lines.size());
         if (!lines.isEmpty()) return lines;
 
-        // Tier 3: HTML fallback to discover signed baseUrl
+        // ---- Tier 3: HTML scrape ------------------------------------------
         String html = simpleGet(watchUrl(videoId));
         Log.d(TAG, "tier3 html payload "
                 + (html == null ? "null" : html.length() + " chars"));
-        if (html == null) {
-            throw new FetchFailedException(
-                    "Could not load watch page for " + videoId, null);
+        if (html != null) {
+            CaptionsTrackResolver.Track track =
+                    CaptionsTrackResolver.findEnglishTrack(html);
+            Log.d(TAG, "tier3 resolved track=" + describe(track));
+            if (track != null) {
+                trackSeen = true;
+                lines = tryFetchLegacy(absolutize(track.baseUrl));
+                Log.d(TAG, "tier3 download lines=" + lines.size());
+                if (!lines.isEmpty()) return lines;
+            }
         }
-        CaptionsTrackResolver.Track track =
-                CaptionsTrackResolver.findEnglishTrack(html);
-        Log.d(TAG, "tier3 resolved track=" + describe(track));
-        if (track == null) {
-            throw new SubtitleUnavailableException(
-                    "No English caption track for " + videoId);
-        }
-        lines = tryFetch(absolutize(track.baseUrl));
-        Log.d(TAG, "tier3 download lines=" + lines.size());
-        if (!lines.isEmpty()) return lines;
 
-        throw new FetchFailedException(
-                "Track " + track.languageCode + "/" + track.kind
-                        + " exists but body could not be downloaded for "
-                        + videoId, null);
+        if (trackSeen) {
+            throw new FetchFailedException(
+                    "Caption track exists but body could not be downloaded for "
+                            + videoId, null);
+        }
+        throw new SubtitleUnavailableException(
+                "No English caption track for " + videoId);
     }
 
+    // -- NewPipe tier ---------------------------------------------------------
+
     @NonNull
-    private List<SubtitleLine> tryFetch(@Nullable String url) {
+    private List<SubtitleLine> fetchViaNewPipe(String videoId) throws Exception {
+        StreamExtractor extractor = ServiceList.YouTube
+                .getStreamExtractor(watchUrl(videoId));
+        extractor.fetchPage();
+
+        // Prefer VTT (what NewPipe normalises to), fall back to whatever
+        // YouTube hands back if VTT isn't offered.
+        List<SubtitlesStream> tracks = extractor.getSubtitles(MediaFormat.VTT);
+        if (tracks == null || tracks.isEmpty()) {
+            tracks = extractor.getSubtitlesDefault();
+        }
+        Log.d(TAG, "tier0 newpipe tracks=" + (tracks == null ? 0 : tracks.size()));
+        if (tracks == null || tracks.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        SubtitlesStream pick = pickEnglish(tracks);
+        if (pick == null) return Collections.emptyList();
+        Log.d(TAG, "tier0 newpipe picked lang=" + pick.getLanguageTag()
+                + " auto=" + pick.isAutoGenerated()
+                + " fmt=" + (pick.getFormat() == null ? "null" : pick.getFormat().getName()));
+
+        String body = simpleGet(pick.getContent());
+        if (body == null || body.isEmpty()) return Collections.emptyList();
+
+        // Try VTT first, fall back to the timedtext parser if the upstream
+        // actually served XML (some tracks come back as TRANSCRIPT3 / srv3
+        // even when we asked for VTT).
+        List<SubtitleLine> parsed = VttParser.parse(body);
+        if (parsed.isEmpty()) parsed = TimedTextParser.parse(body);
+        if (parsed.isEmpty()) {
+            int len = body.length();
+            String sample = body.substring(0, Math.min(200, len))
+                    .replaceAll("\\s+", " ");
+            Log.w(TAG, "tier0 newpipe unparsed body=" + len + "B sample=\"" + sample + "\"");
+        }
+        return parsed;
+    }
+
+    /** Did NewPipe see any caption track at all? Used to disambiguate
+     *  {@code Unavailable} vs {@code FetchFailed} when the legacy tiers
+     *  also produce nothing. */
+    private boolean newPipeReportedTrack(String videoId) {
+        try {
+            StreamExtractor e = ServiceList.YouTube
+                    .getStreamExtractor(watchUrl(videoId));
+            e.fetchPage();
+            List<SubtitlesStream> all = e.getSubtitlesDefault();
+            return all != null && !all.isEmpty();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    @Nullable
+    private static SubtitlesStream pickEnglish(@NonNull List<SubtitlesStream> tracks) {
+        SubtitlesStream manualEn = null;
+        SubtitlesStream autoEn = null;
+        SubtitlesStream anyEn = null;
+        for (SubtitlesStream s : tracks) {
+            String tag = s.getLanguageTag();
+            if (tag == null) continue;
+            // languageTag can be "en", "en-US", "en-GB", …
+            if (!tag.toLowerCase().startsWith("en")) continue;
+            anyEn = s;
+            if (s.isAutoGenerated()) {
+                if (autoEn == null) autoEn = s;
+            } else {
+                if (manualEn == null) manualEn = s;
+            }
+        }
+        if (manualEn != null) return manualEn;
+        if (autoEn != null) return autoEn;
+        return anyEn;
+    }
+
+    // -- Legacy tiers ---------------------------------------------------------
+
+    @NonNull
+    private List<SubtitleLine> tryFetchLegacy(@Nullable String url) {
         if (url == null || url.isEmpty()) return Collections.emptyList();
         String body;
         try {
@@ -105,7 +218,7 @@ public class YouTubeSubtitleService implements SubtitleService {
         } catch (IllegalArgumentException badUrl) {
             // OkHttp throws this for malformed URLs — swallow so the next
             // tier of the resolver can still run.
-            Log.w(TAG, "tryFetch bad URL: " + url, badUrl);
+            Log.w(TAG, "legacy bad URL: " + url, badUrl);
             return Collections.emptyList();
         }
         if (body == null) return Collections.emptyList();
@@ -114,7 +227,7 @@ public class YouTubeSubtitleService implements SubtitleService {
             int len = body.length();
             String sample = body.substring(0, Math.min(200, len))
                     .replaceAll("\\s+", " ");
-            Log.w(TAG, "tryFetch unparsed body=" + len + "B sample=\"" + sample + "\"");
+            Log.w(TAG, "legacy unparsed body=" + len + "B sample=\"" + sample + "\"");
         }
         return lines;
     }
