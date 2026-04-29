@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -170,8 +171,66 @@ public class PlayerActivity extends AppCompatActivity
                 // SPA transitions (auto-play next, redirects to login wall, …)
                 // still get hooked.
                 new WebViewPlayerBridge(PlayerActivity.this).install(v);
+                // If the user tapped a different video inside the WebView
+                // (related video, autoplay queue, search result), the URL
+                // carries a new ?v=ID. Re-fetch subtitles so the bottom
+                // sheet matches the video that's actually playing.
+                handleNavigation(url);
             }
         });
+    }
+
+    /**
+     * Detect in-WebView navigation to a different video and reload
+     * subtitles. Triggered from both onPageFinished (initial + reloads) and
+     * the polling JS bridge (SPA transitions on m.youtube.com that don't fire
+     * a full page load).
+     */
+    private void handleNavigation(@Nullable String url) {
+        String newId = extractVideoId(url);
+        if (newId == null) return;
+        if (newId.equals(videoId)) return;
+
+        Log.d(TAG, "WebView navigated videoId " + videoId + " -> " + newId);
+        videoId = newId;
+        latestLines = Collections.emptyList();
+        state = SubtitleState.LOADING;
+        syncController.attach(Collections.emptyList());
+        applyStateToSheet();
+        loadSubtitlesAsync(newId);
+    }
+
+    @Nullable
+    private static String extractVideoId(@Nullable String url) {
+        if (url == null || url.isEmpty()) return null;
+        try {
+            Uri uri = Uri.parse(url);
+            String host = uri.getHost();
+            if (host == null) return null;
+            if (!host.contains("youtube.com") && !host.equals("youtu.be")) {
+                return null;
+            }
+            // Standard watch URL: youtube.com/watch?v=ID
+            String v = uri.getQueryParameter("v");
+            if (v != null && !v.isEmpty()) return v;
+            // Short link: youtu.be/ID
+            if ("youtu.be".equals(host)) {
+                String path = uri.getPath();
+                if (path != null && path.length() > 1) {
+                    return path.substring(1);
+                }
+            }
+            // Shorts URL: youtube.com/shorts/ID
+            String path = uri.getPath();
+            if (path != null && path.startsWith("/shorts/")) {
+                String tail = path.substring("/shorts/".length());
+                int slash = tail.indexOf('/');
+                return slash > 0 ? tail.substring(0, slash) : tail;
+            }
+            return null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     // --- Subtitle bottom sheet ----------------------------------------------
@@ -267,6 +326,11 @@ public class PlayerActivity extends AppCompatActivity
         }
     }
 
+    @Override
+    public void onLocation(@NonNull String url) {
+        handleNavigation(url);
+    }
+
     private void onActiveLineChanged(int newIndex) {
         if (adapter == null || layoutManager == null) return;
         adapter.setActiveIndex(newIndex);
@@ -280,30 +344,46 @@ public class PlayerActivity extends AppCompatActivity
 
     // --- Subtitle fetch ------------------------------------------------------
 
-    private void loadSubtitlesAsync(@NonNull String videoId) {
+    private void loadSubtitlesAsync(@NonNull String requestedId) {
         io.execute(() -> {
             try {
-                List<SubtitleLine> lines = readCache(videoId);
+                List<SubtitleLine> lines = readCache(requestedId);
                 if (lines != null && !lines.isEmpty()) {
-                    runOnUiThread(() -> applyLines(lines));
+                    runOnUiThread(() -> applyIfStillCurrent(requestedId,
+                            () -> applyLines(lines)));
                     return;
                 }
 
                 SubtitleService service = new YouTubeSubtitleService(http);
                 try {
-                    List<SubtitleLine> fetched = service.fetch(videoId);
-                    writeCache(videoId, fetched);
-                    runOnUiThread(() -> applyLines(fetched));
+                    List<SubtitleLine> fetched = service.fetch(requestedId);
+                    writeCache(requestedId, fetched);
+                    runOnUiThread(() -> applyIfStillCurrent(requestedId,
+                            () -> applyLines(fetched)));
                 } catch (SubtitleService.SubtitleUnavailableException notAvailable) {
-                    runOnUiThread(this::onNoSubtitle);
+                    runOnUiThread(() -> applyIfStillCurrent(requestedId, this::onNoSubtitle));
                 } catch (SubtitleService.FetchFailedException fetchFail) {
-                    runOnUiThread(this::onFetchFailed);
+                    runOnUiThread(() -> applyIfStillCurrent(requestedId, this::onFetchFailed));
                 }
             } catch (RuntimeException unexpected) {
                 Log.e(TAG, "Unexpected subtitle fetch failure", unexpected);
-                runOnUiThread(this::onFetchFailed);
+                runOnUiThread(() -> applyIfStillCurrent(requestedId, this::onFetchFailed));
             }
         });
+    }
+
+    /**
+     * Guard against stale fetch results — when the user rapidly switches
+     * between videos, an earlier in-flight fetch must not clobber the state
+     * for the video that's now actually playing.
+     */
+    private void applyIfStillCurrent(@NonNull String requestedId, @NonNull Runnable action) {
+        if (!requestedId.equals(videoId)) {
+            Log.d(TAG, "Dropping stale fetch result for " + requestedId
+                    + " (current=" + videoId + ")");
+            return;
+        }
+        action.run();
     }
 
     private void applyLines(@NonNull List<SubtitleLine> lines) {

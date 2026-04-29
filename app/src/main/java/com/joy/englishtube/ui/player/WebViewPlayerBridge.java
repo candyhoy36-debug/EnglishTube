@@ -30,6 +30,14 @@ public class WebViewPlayerBridge {
     public interface Callback {
         @UiThread void onReady();
         @UiThread void onTime(float seconds);
+
+        /**
+         * Fired when the WebView's {@code location.href} changes between
+         * two YouTube watch URLs without firing a full page load. m.youtube.com
+         * is a single-page app, so tapping a related video usually leaves
+         * {@code WebViewClient.onPageFinished} silent.
+         */
+        @UiThread void onLocation(@NonNull String url);
     }
 
     /** Name exposed to JS — referenced by {@link #JS_INSTALL}. */
@@ -50,8 +58,21 @@ public class WebViewPlayerBridge {
             + "  }"
             + "  var lastTime = -1;"
             + "  var notifiedReady = false;"
+            + "  var lastHref = location.href;"
+            + "  if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onLocation) {"
+            + "    window." + "NAME_PLACEHOLDER" + ".onLocation(lastHref);"
+            + "  }"
             + "  setInterval(function() {"
             + "    try {"
+            + "      var href = location.href;"
+            + "      if (href !== lastHref) {"
+            + "        lastHref = href;"
+            + "        notifiedReady = false;"
+            + "        lastTime = -1;"
+            + "        if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onLocation) {"
+            + "          window." + "NAME_PLACEHOLDER" + ".onLocation(href);"
+            + "        }"
+            + "      }"
             + "      var v = findVideo();"
             + "      if (!v) return;"
             + "      if (!notifiedReady) {"
@@ -115,5 +136,14 @@ public class WebViewPlayerBridge {
     @WorkerThread
     public void onTime(float seconds) {
         main.post(() -> callback.onTime(seconds));
+    }
+
+    @JavascriptInterface
+    @WorkerThread
+    public void onLocation(@NonNull String url) {
+        // Always copy the string out of the JS thread context before
+        // hopping onto the main looper.
+        final String captured = url;
+        main.post(() -> callback.onLocation(captured));
     }
 }
