@@ -30,8 +30,16 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
         void onLineClick(int position, SubtitleLine line);
     }
 
+    /**
+     * Which language tracks to render. EN shows only the English row;
+     * VI shows only the Vietnamese row (English row hidden); BOTH shows
+     * both stacked.
+     */
+    public enum LangMode { EN, VI, BOTH }
+
     private List<SubtitleLine> lines = Collections.emptyList();
     private int activeIndex = -1;
+    private LangMode langMode = LangMode.EN;
     @androidx.annotation.Nullable
     private OnLineClickListener clickListener;
 
@@ -57,6 +65,22 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
         return activeIndex;
     }
 
+    public void setLangMode(@NonNull LangMode mode) {
+        if (mode == langMode) return;
+        langMode = mode;
+        notifyDataSetChanged();
+    }
+
+    /**
+     * Refresh after a translation pass finishes, so the cached cues
+     * pick up their new {@code textVi}. We can't use
+     * {@link #notifyItemRangeChanged(int, int)} alone because the
+     * caller may have replaced the entire list with translated copies.
+     */
+    public void refreshTranslations() {
+        notifyDataSetChanged();
+    }
+
     @NonNull
     @Override
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -69,8 +93,23 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int position) {
         SubtitleLine line = lines.get(position);
         h.timestamp.setText(formatTimestamp(line.startMs));
-        h.en.setText(line.textEn);
-        if (line.textVi != null && !line.textVi.isEmpty()) {
+
+        boolean hasVi = line.textVi != null && !line.textVi.isEmpty();
+        // VI-only mode falls back to EN if the translation hasn't landed
+        // yet — empty rows would feel broken.
+        boolean showEn = langMode == LangMode.EN
+                || langMode == LangMode.BOTH
+                || !hasVi;
+        boolean showVi = langMode != LangMode.EN && hasVi;
+
+        if (showEn) {
+            h.en.setText(line.textEn);
+            h.en.setVisibility(View.VISIBLE);
+        } else {
+            h.en.setVisibility(View.GONE);
+        }
+
+        if (showVi) {
             h.vi.setText(line.textVi);
             h.vi.setVisibility(View.VISIBLE);
         } else {
@@ -78,16 +117,25 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
         }
 
         boolean active = position == activeIndex;
+        int activeColor = ContextCompat.getColor(h.itemView.getContext(),
+                R.color.brand_primary_dark);
+        int normalColor = ContextCompat.getColor(h.itemView.getContext(),
+                R.color.text_primary);
         if (active) {
             h.itemView.setBackgroundResource(R.drawable.bg_subtitle_item_active);
-            h.en.setTextColor(ContextCompat.getColor(h.itemView.getContext(),
-                    R.color.brand_primary_dark));
+            h.en.setTextColor(activeColor);
             h.en.setTypeface(null, Typeface.BOLD);
+            // Highlight VI too — when EN is hidden in VI-only mode the bold
+            // accent must still travel with the active row.
+            h.vi.setTextColor(activeColor);
+            h.vi.setTypeface(null, Typeface.BOLD);
         } else {
             h.itemView.setBackgroundColor(0x00000000);
-            h.en.setTextColor(ContextCompat.getColor(h.itemView.getContext(),
-                    R.color.text_primary));
+            h.en.setTextColor(normalColor);
             h.en.setTypeface(null, Typeface.NORMAL);
+            h.vi.setTextColor(ContextCompat.getColor(h.itemView.getContext(),
+                    R.color.text_secondary));
+            h.vi.setTypeface(null, Typeface.NORMAL);
         }
 
         h.itemView.setOnClickListener(v -> {
