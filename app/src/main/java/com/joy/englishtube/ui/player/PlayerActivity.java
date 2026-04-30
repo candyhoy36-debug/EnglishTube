@@ -3,26 +3,35 @@ package com.joy.englishtube.ui.player;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.lifecycle.Lifecycle;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -113,6 +122,20 @@ public class PlayerActivity extends AppCompatActivity
     private TextView bannerMessage;
     private Button btnRetryFetch;
 
+    // Sprint 5 fullscreen overlay state. The container hosts the WebView's
+    // HTML5-fullscreen customView; the overlay shows the active EN/VI line
+    // on top of the video while fullscreen is active.
+    private FrameLayout fullscreenContainer;
+    private LinearLayout subtitleOverlay;
+    private TextView tvOverlayEn;
+    private TextView tvOverlayVi;
+    @Nullable
+    private View customView;
+    @Nullable
+    private WebChromeClient.CustomViewCallback customViewCallback;
+    private int savedRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+    private boolean isFullscreen = false;
+
     // --- Auxiliary feature state ---
     private int activeLineIndex = -1;
     private boolean loopLineEnabled = false;
@@ -159,6 +182,24 @@ public class PlayerActivity extends AppCompatActivity
         webView = findViewById(R.id.webview_player);
         webProgress = findViewById(R.id.web_progress);
         fabSubtitles = findViewById(R.id.fab_subtitles);
+        fullscreenContainer = findViewById(R.id.fullscreen_container);
+        subtitleOverlay = findViewById(R.id.subtitle_overlay);
+        tvOverlayEn = findViewById(R.id.tv_overlay_en);
+        tvOverlayVi = findViewById(R.id.tv_overlay_vi);
+
+        // Use the modern back-press dispatcher so we can intercept Back to
+        // exit fullscreen first (instead of letting the activity finish).
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (isFullscreen) {
+                    exitFullscreen();
+                    return;
+                }
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+            }
+        });
 
         bindActionBar();
         bindSubtitlePanel();
@@ -272,6 +313,16 @@ public class PlayerActivity extends AppCompatActivity
             public void onProgressChanged(WebView view, int newProgress) {
                 webProgress.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
                 webProgress.setProgress(newProgress);
+            }
+
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                enterFullscreen(view, callback);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                exitFullscreen();
             }
         });
 
@@ -458,6 +509,9 @@ public class PlayerActivity extends AppCompatActivity
         activeLineIndex = newIndex;
         if (adapter == null || layoutManager == null) return;
         adapter.setActiveIndex(newIndex);
+        // Sprint 5: keep the fullscreen overlay text in sync. Cheap no-op
+        // when overlay is hidden, so we don't gate it on isFullscreen.
+        updateOverlayText();
         if (newIndex < 0) return;
         if (!getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) return;
 
@@ -554,6 +608,9 @@ public class PlayerActivity extends AppCompatActivity
         btnLangMode.setText(labelRes);
         btnLangMode.setSelected(langMode != LangMode.EN);
         if (adapter != null) adapter.setLangMode(adapterMode);
+        // Overlay row visibilities track LangMode too — EN-only hides the
+        // VI line, VI-only hides the EN line, BOTH stacks them.
+        updateOverlayText();
     }
 
     @Nullable
@@ -606,6 +663,121 @@ public class PlayerActivity extends AppCompatActivity
             TopSmoothScroller scroller = new TopSmoothScroller(this);
             scroller.setTargetPosition(newActive);
             layoutManager.startSmoothScroll(scroller);
+        }
+    }
+
+    // --- Sprint 5 fullscreen overlay ----------------------------------------
+
+    /**
+     * Called from {@link WebChromeClient#onShowCustomView} when YouTube's
+     * mobile page enters HTML5 fullscreen on the &lt;video&gt; element. We
+     * mount the supplied native view over the player chrome, force
+     * landscape, and reveal the bilingual overlay so the user can keep
+     * reading subtitles while the YouTube UI takes over.
+     */
+    private void enterFullscreen(@NonNull View view, @NonNull WebChromeClient.CustomViewCallback callback) {
+        // Defensive: YouTube may double-fire onShowCustomView between SPA
+        // navigations. Drop the second one cleanly so we don't leak the
+        // first customView.
+        if (customView != null) {
+            callback.onCustomViewHidden();
+            return;
+        }
+
+        customView = view;
+        customViewCallback = callback;
+        isFullscreen = true;
+
+        savedRequestedOrientation = getRequestedOrientation();
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+
+        Window window = getWindow();
+        WindowCompat.setDecorFitsSystemWindows(window, false);
+        WindowInsetsControllerCompat ctrl =
+                WindowCompat.getInsetsController(window, window.getDecorView());
+        ctrl.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        ctrl.hide(WindowInsetsCompat.Type.systemBars());
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        fullscreenContainer.removeAllViews();
+        fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        fullscreenContainer.setVisibility(View.VISIBLE);
+        fullscreenContainer.bringToFront();
+        subtitleOverlay.setVisibility(View.VISIBLE);
+        subtitleOverlay.bringToFront();
+
+        updateOverlayText();
+    }
+
+    /**
+     * Mirror of {@link #enterFullscreen}. Restores the activity's portrait
+     * orientation, brings the system bars back, and tears down the YouTube
+     * customView. Safe to call multiple times.
+     */
+    private void exitFullscreen() {
+        if (!isFullscreen && customView == null) return;
+        isFullscreen = false;
+
+        fullscreenContainer.setVisibility(View.GONE);
+        fullscreenContainer.removeAllViews();
+        subtitleOverlay.setVisibility(View.GONE);
+
+        if (customViewCallback != null) {
+            try {
+                customViewCallback.onCustomViewHidden();
+            } catch (RuntimeException e) {
+                Log.w(TAG, "customView onHidden threw", e);
+            }
+        }
+        customView = null;
+        customViewCallback = null;
+
+        setRequestedOrientation(savedRequestedOrientation);
+
+        Window window = getWindow();
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        WindowCompat.setDecorFitsSystemWindows(window, true);
+        WindowInsetsControllerCompat ctrl =
+                WindowCompat.getInsetsController(window, window.getDecorView());
+        ctrl.show(WindowInsetsCompat.Type.systemBars());
+    }
+
+    /**
+     * Refresh the overlay's EN/VI TextViews from the current active line.
+     * Honours {@link #langMode} (hides the row that the user has switched
+     * off) and falls back to EN-only if Vi translation hasn't landed yet,
+     * mirroring the inline panel's behaviour.
+     */
+    private void updateOverlayText() {
+        if (subtitleOverlay == null) return;
+        SubtitleLine line = currentActiveLine();
+        if (line == null) {
+            tvOverlayEn.setText("");
+            tvOverlayVi.setText("");
+            tvOverlayEn.setVisibility(View.GONE);
+            tvOverlayVi.setVisibility(View.GONE);
+            return;
+        }
+        boolean hasVi = line.textVi != null && !line.textVi.isEmpty();
+        boolean showEn = langMode == LangMode.EN
+                || langMode == LangMode.BOTH
+                || !hasVi;
+        boolean showVi = langMode != LangMode.EN && hasVi;
+
+        if (showEn) {
+            tvOverlayEn.setText(line.textEn == null ? "" : line.textEn);
+            tvOverlayEn.setVisibility(View.VISIBLE);
+        } else {
+            tvOverlayEn.setVisibility(View.GONE);
+        }
+        if (showVi) {
+            tvOverlayVi.setText(line.textVi);
+            tvOverlayVi.setVisibility(View.VISIBLE);
+        } else {
+            tvOverlayVi.setVisibility(View.GONE);
         }
     }
 
@@ -864,6 +1036,10 @@ public class PlayerActivity extends AppCompatActivity
 
     @Override
     protected void onDestroy() {
+        // Make sure system bars / orientation come back before the activity
+        // tears down — otherwise an in-flight fullscreen could leak the
+        // landscape-locked rotation onto the next screen.
+        if (isFullscreen) exitFullscreen();
         syncController.detach();
         io.shutdownNow();
         if (webView != null) {

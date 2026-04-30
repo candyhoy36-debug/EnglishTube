@@ -342,4 +342,77 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toBottomOf="parent" />
 
+    <!--
+        Sprint 5 fullscreen container + subtitle overlay.
+
+        fullscreen_container hosts the WebChromeClient's customView when
+        the YouTube page enters HTML5 fullscreen. It sits z-above the
+        normal player chrome (the action bar / WebView / subtitle panel)
+        and stays GONE when not in fullscreen.
+
+        subtitle_overlay shows the active EN/VI cue while fullscreen is
+        active so the user can keep reading subtitles even though the
+        bottom-sheet panel is hidden under the YouTube video. Anchored
+        bottom-center; the inner LinearLayout has a translucent scrim
+        so text stays readable on bright video.
+    -->
+    <FrameLayout
+        android:id="@+id/fullscreen_container"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/black"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <LinearLayout
+        android:id="@+id/subtitle_overlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="32dp"
+        android:layout_marginBottom="48dp"
+        android:background="@color/overlay_scrim"
+        android:clickable="false"
+        android:focusable="false"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/tv_overlay_en"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:shadowColor="#CC000000"
+            android:shadowDx="0"
+            android:shadowDy="0"
+            android:shadowRadius="6"
+            android:textColor="@color/overlay_text_en"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            tools:text="So getting some shut eye, dozing, taking a nap." />
+
+        <TextView
+            android:id="@+id/tv_overlay_vi"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:shadowColor="#CC000000"
+            android:shadowDx="0"
+            android:shadowDy="0"
+            android:shadowRadius="6"
+            android:textColor="@color/overlay_text_vi"
+            android:textSize="16sp"
+            tools:text="Vậy là chợp mắt, ngủ gật, ngủ trưa." />
+
+    </LinearLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>
