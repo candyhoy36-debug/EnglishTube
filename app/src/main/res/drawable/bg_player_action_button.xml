@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Background for the auxiliary action-bar buttons in PlayerActivity.
+
+    selected=true → tinted (button is "active" / toggled on).
+    selected=false → flat / transparent.
+
+    Always wraps a ripple so taps still feel right on Android 5+.
+-->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+    <item>
+        <selector>
+            <item android:state_selected="true">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/player_action_active_bg" />
+                    <corners android:radius="8dp" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@android:color/transparent" />
+                    <corners android:radius="8dp" />
+                </shape>
+            </item>
+        </selector>
+    </item>
+</ripple>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Pill-shaped background for the per-line timestamp shown at the
+    leading edge of every subtitle row. Uses a soft brand-tint so the
+    pill reads as a small chip without competing with the line text.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/subtitle_active_bg" />
+    <corners android:radius="6dp" />
+</shape>

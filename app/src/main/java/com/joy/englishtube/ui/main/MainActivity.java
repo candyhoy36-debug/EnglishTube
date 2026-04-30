@@ -49,6 +49,16 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton btnBack;
     private ImageButton btnForward;
 
+    /**
+     * Tracks the most recently routed videoId so we don't double-fire when
+     * both {@code shouldOverrideUrlLoading} and {@code doUpdateVisitedHistory}
+     * see the same URL during a single navigation. Cleared in {@code onResume}
+     * (when the user comes back from PlayerActivity) and whenever the WebView
+     * navigates to a non-watch URL.
+     */
+    @Nullable
+    private String lastInterceptedVideoId;
+
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,13 +126,25 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return interceptOrLoad(request.getUrl().toString());
+                return interceptOrLoad(view, request.getUrl().toString(), false);
             }
 
             // Legacy overload for older WebViews; both delegate to the same logic.
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return interceptOrLoad(url);
+                return interceptOrLoad(view, url, false);
+            }
+
+            /*
+             * YouTube mobile web uses History API (pushState) for in-app
+             * navigation, which means clicking a video DOES NOT trigger
+             * shouldOverrideUrlLoading. doUpdateVisitedHistory is fired even
+             * for pushState transitions, so we hook it here too.
+             */
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                super.doUpdateVisitedHistory(view, url, isReload);
+                interceptOrLoad(view, url, true);
             }
 
             @Override
@@ -147,16 +169,35 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * @return true if the URL was intercepted (PlayerActivity opened); the WebView
-     *         should NOT load it. False to let the WebView handle the URL itself.
+     * Routes watch URLs to PlayerActivity from either path (hard nav via
+     * shouldOverrideUrlLoading, or soft nav via doUpdateVisitedHistory).
+     *
+     * @param fromHistoryUpdate true if this was triggered by a pushState
+     *     transition. In that case the WebView has already changed URL state,
+     *     so we pop the entry to keep the WebView parked on the listing page.
+     * @return true if the URL was intercepted (only meaningful for
+     *         shouldOverrideUrlLoading; doUpdateVisitedHistory ignores the
+     *         return value).
      */
-    private boolean interceptOrLoad(@Nullable String url) {
+    private boolean interceptOrLoad(WebView view, @Nullable String url, boolean fromHistoryUpdate) {
         String videoId = VideoIdExtractor.extractStandardWatch(url);
-        if (videoId != null) {
-            startActivity(PlayerActivity.intent(this, videoId));
-            return true;
+        if (videoId == null) {
+            // Reset whenever the user moves to a non-watch URL so the next
+            // visit to the same video opens PlayerActivity again.
+            lastInterceptedVideoId = null;
+            return false;
         }
-        return false;
+        if (videoId.equals(lastInterceptedVideoId)) return true;
+        lastInterceptedVideoId = videoId;
+
+        if (fromHistoryUpdate) {
+            // Pop the watch URL out of WebView history so the user lands back
+            // on the listing/search page when they exit PlayerActivity.
+            view.stopLoading();
+            if (view.canGoBack()) view.goBack();
+        }
+        startActivity(PlayerActivity.intent(this, videoId));
+        return true;
     }
 
     private void updateNavButtons() {
@@ -206,6 +247,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         webView.onResume();
+        // Allow the same video to re-route on next click after returning from
+        // PlayerActivity (otherwise we'd ignore the navigation as a duplicate).
+        lastInterceptedVideoId = null;
         updateNavButtons();
     }
 

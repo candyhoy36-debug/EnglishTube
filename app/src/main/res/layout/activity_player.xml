@@ -1,54 +1,345 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Sprint 2 player layout.
+
+    Top: a thin auxiliary action bar with four toggle buttons —
+        Ghép câu · Lặp dòng · Bookmark · A↔a (EN/VI/Cả hai).
+        This replaces the old MaterialToolbar so we get more
+        screen real estate; back navigation falls back to the
+        Android system gesture / hardware key.
+
+    Middle: the WebView fills the rest of the content area and
+        renders the YouTube mobile page exactly as it would on
+        the device's browser.
+
+    Bottom (overlay, toggled by FAB): the subtitle panel slides up
+        and is anchored under the actual <video> element via the
+        JS bridge's onVideoBottom() callback so the player chrome
+        (progress bar, fullscreen button, etc) stays visible.
+-->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:fitsSystemWindows="true">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
+    <!-- Auxiliary action bar (replaces MaterialToolbar). -->
+    <LinearLayout
+        android:id="@+id/player_action_bar"
         android:layout_width="0dp"
-        android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary"
-        android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar"
+        android:layout_height="wrap_content"
+        android:background="@color/player_action_bar_bg"
+        android:elevation="2dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="6dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:navigationIcon="@drawable/ic_arrow_back"
-        app:title="@string/title_player" />
+        app:layout_constraintEnd_toEndOf="parent">
 
-    <TextView
-        android:id="@+id/tv_video_id"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:padding="24dp"
-        android:textAppearance="?attr/textAppearanceHeadline6"
-        app:layout_constraintTop_toBottomOf="@id/toolbar"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        <TextView
+            android:id="@+id/btn_combine_lines"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_link"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/action_combine_lines"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
 
-    <TextView
-        android:id="@+id/tv_player_placeholder"
+        <TextView
+            android:id="@+id/btn_loop_line"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_loop"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/action_loop_line"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/btn_bookmark_line"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_bookmark"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/action_bookmark_line"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/btn_lang_mode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_translate"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/lang_mode_en"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/web_progress"
+        style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:padding="24dp"
-        android:text="@string/player_placeholder_sprint1"
-        android:textAppearance="?attr/textAppearanceBody1"
-        android:textColor="@color/text_secondary"
-        app:layout_constraintTop_toBottomOf="@id/tv_video_id"
+        android:layout_height="3dp"
+        android:max="100"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/player_action_bar"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_open_in_youtube"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:text="@string/open_in_youtube"
-        app:icon="@drawable/ic_open_in_new"
-        app:layout_constraintTop_toBottomOf="@id/tv_player_placeholder"
+    <WebView
+        android:id="@+id/webview_player"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/black"
+        app:layout_constraintTop_toBottomOf="@id/web_progress"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <!--
+        Slide-up subtitle panel. Default visibility=gone so the user
+        sees the YouTube page below the video at first. The FAB
+        toggles this on/off.
+
+        Top margin is updated at runtime by PlayerActivity when the
+        JS bridge reports the &lt;video&gt; element's actual bottom
+        edge. The 280dp default just covers the common case so we
+        have a sensible starting position before the first JS tick.
+    -->
+    <LinearLayout
+        android:id="@+id/subtitle_panel"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="280dp"
+        android:orientation="vertical"
+        android:background="@color/background"
+        android:elevation="6dp"
+        android:visibility="gone"
+        tools:visibility="visible"
+        app:layout_constraintTop_toTopOf="@id/webview_player"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/divider" />
+
+        <!--
+            Subtitle-panel auxiliary action row. All four buttons are
+            stubs at the moment — toasts announce the sprint each
+            feature is planned for. They sit where the old "Phụ đề"
+            title used to live.
+        -->
+        <LinearLayout
+            android:id="@+id/subtitle_panel_actions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="6dp">
+
+            <TextView
+                android:id="@+id/btn_search_subtitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_player_action_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:drawableTop="@drawable/ic_search"
+                android:drawablePadding="2dp"
+                android:gravity="center"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="6dp"
+                android:text="@string/action_search_subtitle"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                app:drawableTint="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/btn_playback_speed"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_player_action_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:drawableTop="@drawable/ic_speed"
+                android:drawablePadding="2dp"
+                android:gravity="center"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="6dp"
+                android:text="@string/action_playback_speed"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                app:drawableTint="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/btn_text_size"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_player_action_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:drawableTop="@drawable/ic_text_size"
+                android:drawablePadding="2dp"
+                android:gravity="center"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="6dp"
+                android:text="@string/action_text_size"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                app:drawableTint="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/btn_download_srt"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_player_action_button"
+                android:clickable="true"
+                android:focusable="true"
+                android:drawableTop="@drawable/ic_download"
+                android:drawablePadding="2dp"
+                android:gravity="center"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="6dp"
+                android:text="@string/action_download_srt"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                app:drawableTint="@color/text_primary" />
+
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/subtitle_state_container"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recycler_subtitles"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingVertical="8dp"
+                android:scrollbars="vertical"
+                tools:listitem="@layout/item_subtitle" />
+
+            <ProgressBar
+                android:id="@+id/subtitle_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:visibility="gone"
+                tools:visibility="visible" />
+
+            <LinearLayout
+                android:id="@+id/banner_no_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:layout_margin="12dp"
+                android:background="@color/banner_warning_bg"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_gravity="center_vertical"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_warning"
+                        app:tint="@color/banner_warning_text" />
+
+                    <TextView
+                        android:id="@+id/tv_banner_message"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:text="@string/no_subtitle_banner"
+                        android:textColor="@color/banner_warning_text" />
+
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btn_retry_fetch"
+                    style="?attr/borderlessButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/action_retry"
+                    android:textColor="@color/banner_warning_text"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+            </LinearLayout>
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_subtitles"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:contentDescription="@string/fab_subtitles_description"
+        app:srcCompat="@drawable/ic_closed_caption"
+        app:tint="@android:color/white"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

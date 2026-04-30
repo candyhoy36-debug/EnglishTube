@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Background for the currently-playing subtitle line.
+
+    Layered drawable: the soft brand-tinted fill plus a 4dp accent
+    bar pinned to the leading edge so the active row is unmistakable
+    even when the user has the panel scrolled with the active line
+    sitting at the very top.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/subtitle_active_bg" />
+        </shape>
+    </item>
+    <item
+        android:width="4dp"
+        android:gravity="start">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/brand_primary" />
+        </shape>
+    </item>
+</layer-list>

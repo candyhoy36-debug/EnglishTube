@@ -15,4 +15,13 @@
 
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <color name="banner_warning_bg">#FFFFF8E1</color>
+    <color name="banner_warning_text">#FF6D4C00</color>
+
+    <color name="background">#FFFAFAFA</color>
+    <color name="divider">#FFE0E0E0</color>
+
+    <color name="player_action_bar_bg">#FFFFFFFF</color>
+    <color name="player_action_active_bg">#1F1976D2</color>
 </resources>
