@@ -39,6 +39,10 @@ import com.joy.englishtube.data.SubtitleCacheEntity;
 import com.joy.englishtube.model.SubtitleLine;
 import com.joy.englishtube.service.PlayerSyncController;
 import com.joy.englishtube.service.SubtitleService;
+import com.joy.englishtube.service.TranslationService;
+import com.joy.englishtube.service.impl.AutoTranslateService;
+import com.joy.englishtube.service.impl.GoogleTranslateService;
+import com.joy.englishtube.service.impl.MlKitTranslateService;
 import com.joy.englishtube.service.impl.PlayerSyncControllerImpl;
 import com.joy.englishtube.service.impl.YouTubeSubtitleService;
 
@@ -73,6 +77,7 @@ public class PlayerActivity extends AppCompatActivity
 
     private static final String TAG = "PlayerActivity";
     private static final String SUBTITLE_LANG_EN = "en";
+    private static final String SUBTITLE_LANG_VI = "vi";
     private static final long ACTIVE_LINE_TICK_MS = 250L; // ~4Hz, NFR-05
 
     @NonNull
@@ -119,6 +124,12 @@ public class PlayerActivity extends AppCompatActivity
     private final PlayerSyncController syncController = new PlayerSyncControllerImpl();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final OkHttpClient http = new OkHttpClient();
+    // Auto: Google online (fast, batched) → ML Kit on-device fallback. The
+    // service is stateless so a single instance is reused across videos.
+    private final TranslationService translationService =
+            new AutoTranslateService(
+                    new GoogleTranslateService(http),
+                    new MlKitTranslateService());
     private long lastTickMs = 0L;
 
     private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
@@ -508,28 +519,33 @@ public class PlayerActivity extends AppCompatActivity
                 break;
         }
         applyLangMode();
-        if (langMode != LangMode.EN) {
-            Toast.makeText(this, R.string.lang_mode_not_yet, Toast.LENGTH_SHORT).show();
-        }
+        // Translation is already running (or done) from applyLines();
+        // toggling the mode just affects rendering. If translation is still
+        // mid-flight the adapter falls back to EN per cue, so no toast.
     }
 
     private void applyLangMode() {
         if (btnLangMode == null) return;
         int labelRes;
+        SubtitleAdapter.LangMode adapterMode;
         switch (langMode) {
             case VI:
                 labelRes = R.string.lang_mode_vi;
+                adapterMode = SubtitleAdapter.LangMode.VI;
                 break;
             case BOTH:
                 labelRes = R.string.lang_mode_both;
+                adapterMode = SubtitleAdapter.LangMode.BOTH;
                 break;
             case EN:
             default:
                 labelRes = R.string.lang_mode_en;
+                adapterMode = SubtitleAdapter.LangMode.EN;
                 break;
         }
         btnLangMode.setText(labelRes);
         btnLangMode.setSelected(langMode != LangMode.EN);
+        if (adapter != null) adapter.setLangMode(adapterMode);
     }
 
     @Nullable
@@ -587,6 +603,9 @@ public class PlayerActivity extends AppCompatActivity
         state = SubtitleState.READY;
         syncController.attach(lines);
         applyStateToSheet();
+        // Kick off (or resume from cache) the EN→VI translation pass so the
+        // user can flip to VI / Both via the lang button without waiting.
+        if (videoId != null) translateAsync(videoId, lines);
     }
 
     private void onNoSubtitle() {
@@ -652,6 +671,94 @@ public class PlayerActivity extends AppCompatActivity
         row.payloadJson = GSON.toJson(lines);
         row.fetchedAt = System.currentTimeMillis();
         dao.upsert(row);
+    }
+
+    /**
+     * Read a cached EN→VI translation as a list of strings parallel to the
+     * cue list. Returns {@code null} when the cache row is missing or the
+     * stored count doesn't match the current cue count (e.g. cue list got
+     * re-fetched after the previous translation).
+     */
+    @Nullable
+    private List<String> readTranslationCache(String videoId, int expectedSize) {
+        SubtitleCacheDao dao = EnglishTubeApp.get().getDatabase().subtitleCacheDao();
+        SubtitleCacheEntity row = dao.find(videoId, SUBTITLE_LANG_VI);
+        if (row == null || row.payloadJson == null) return null;
+        try {
+            String[] arr = GSON.fromJson(row.payloadJson, String[].class);
+            if (arr == null || arr.length != expectedSize) return null;
+            return java.util.Arrays.asList(arr);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void writeTranslationCache(String videoId, List<String> translations) {
+        if (translations == null || translations.isEmpty()) return;
+        SubtitleCacheDao dao = EnglishTubeApp.get().getDatabase().subtitleCacheDao();
+        SubtitleCacheEntity row = new SubtitleCacheEntity();
+        row.videoId = videoId;
+        row.lang = SUBTITLE_LANG_VI;
+        row.payloadJson = GSON.toJson(translations.toArray(new String[0]));
+        row.fetchedAt = System.currentTimeMillis();
+        dao.upsert(row);
+    }
+
+    // --- Translation ---------------------------------------------------------
+
+    /**
+     * Translate the cue list to Vietnamese off the main thread. The cache
+     * is consulted first so re-opening a previously-translated video is
+     * instant. When the network call succeeds we mutate {@code textVi}
+     * in place on the cached cue list and ask the adapter to redraw —
+     * the adapter is bound to the same list reference {@link #latestLines}
+     * holds, so this is enough to surface the new text.
+     */
+    private void translateAsync(@NonNull String requestedId, @NonNull List<SubtitleLine> lines) {
+        if (lines.isEmpty()) return;
+
+        io.execute(() -> {
+            // Cache hit short-circuits everything — most users will reopen
+            // the same TED talks repeatedly, and that should never re-burn
+            // a Google Translate round trip.
+            List<String> cached = readTranslationCache(requestedId, lines.size());
+            if (cached != null) {
+                runOnUiThread(() -> applyTranslationsIfStillCurrent(
+                        requestedId, lines, cached));
+                return;
+            }
+
+            List<String> sources = new java.util.ArrayList<>(lines.size());
+            for (SubtitleLine line : lines) {
+                sources.add(line.textEn == null ? "" : line.textEn);
+            }
+
+            try {
+                List<String> translated = translationService.translateEnToVi(sources);
+                writeTranslationCache(requestedId, translated);
+                runOnUiThread(() -> applyTranslationsIfStillCurrent(
+                        requestedId, lines, translated));
+            } catch (TranslationService.TranslationException e) {
+                Log.w(TAG, "translation failed for " + requestedId
+                        + ": " + e.getMessage());
+                // Leave the cue list as English-only; the adapter falls
+                // back to EN per cue when textVi is null.
+            } catch (RuntimeException unexpected) {
+                Log.e(TAG, "translation crashed for " + requestedId, unexpected);
+            }
+        });
+    }
+
+    private void applyTranslationsIfStillCurrent(@NonNull String requestedId,
+                                                 @NonNull List<SubtitleLine> lines,
+                                                 @NonNull List<String> translations) {
+        if (!requestedId.equals(videoId)) return;
+        if (lines != latestLines) return; // user navigated to a different cue list
+        int n = Math.min(lines.size(), translations.size());
+        for (int i = 0; i < n; i++) {
+            lines.get(i).textVi = translations.get(i);
+        }
+        if (adapter != null) adapter.refreshTranslations();
     }
 
     // --- Lifecycle -----------------------------------------------------------
