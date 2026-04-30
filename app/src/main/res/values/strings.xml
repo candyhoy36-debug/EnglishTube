@@ -44,7 +44,6 @@
     <string name="loop_on_no_active">Chọn 1 dòng trước khi bật lặp dòng.</string>
     <string name="bookmark_no_active">Chưa có dòng phụ đề nào đang phát.</string>
     <string name="bookmark_saved">Đã bookmark dòng này.</string>
-    <string name="combine_not_yet">Tính năng ghép câu sẽ có ở Sprint 4.</string>
 
     <!-- Subtitle panel auxiliary action row (stubs for future sprints) -->
     <string name="action_search_subtitle">Tìm</string>
