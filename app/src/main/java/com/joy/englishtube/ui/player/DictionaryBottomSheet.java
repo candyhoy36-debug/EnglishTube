@@ -10,7 +10,9 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -97,6 +99,16 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
         ProgressBar progress = view.findViewById(R.id.dictionary_progress);
         webView = view.findViewById(R.id.webview_dictionary);
         btnBack = view.findViewById(R.id.btn_dictionary_back);
+        View dragHandle = view.findViewById(R.id.dictionary_drag_handle);
+
+        // The body of the sheet is non-draggable (so the inner WebView can
+        // own scroll without the BottomSheetBehavior eating swipe-down).
+        // The drag handle therefore needs its own dismiss affordances:
+        //   • tap = close
+        //   • drag down past a small threshold = close
+        // This keeps the gesture vocabulary the user already learned.
+        dragHandle.setOnClickListener(v -> dismiss());
+        attachHandleDragToDismiss(dragHandle);
 
         tvWord.setText(word);
 
@@ -217,6 +229,42 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
     private void refreshBackButton() {
         if (btnBack == null || webView == null) return;
         btnBack.setVisibility(webView.canGoBack() ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * Treat any downward swipe on the handle that exceeds ~4x the system
+     * touch slop as a dismiss gesture. We don't translate the sheet during
+     * drag (BottomSheetBehavior is non-draggable for the body) — we just
+     * fire {@link #dismiss()} once the threshold is crossed, which animates
+     * the sheet out via the standard hide path.
+     */
+    private void attachHandleDragToDismiss(@NonNull View handle) {
+        final int slop = ViewConfiguration.get(handle.getContext())
+                .getScaledTouchSlop() * 4;
+        handle.setOnTouchListener(new View.OnTouchListener() {
+            private float downY;
+            private boolean fired;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downY = e.getRawY();
+                        fired = false;
+                        return false;
+                    case MotionEvent.ACTION_MOVE:
+                        if (!fired && (e.getRawY() - downY) > slop) {
+                            fired = true;
+                            dismiss();
+                            return true;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+                return false;
+            }
+        });
     }
 
     @Override
