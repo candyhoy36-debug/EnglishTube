@@ -45,6 +45,7 @@ import com.joy.englishtube.service.impl.GoogleTranslateService;
 import com.joy.englishtube.service.impl.MlKitTranslateService;
 import com.joy.englishtube.service.impl.PlayerSyncControllerImpl;
 import com.joy.englishtube.service.impl.YouTubeSubtitleService;
+import com.joy.englishtube.util.SentenceJoiner;
 
 import java.lang.reflect.Type;
 import java.util.Collections;
@@ -118,6 +119,9 @@ public class PlayerActivity extends AppCompatActivity
     private long loopStartMs = -1L;
     private long loopEndMs = -1L;
     private LangMode langMode = LangMode.EN;
+    // Sprint 4: when true, the panel + sync controller operate on a
+    // sentence-grouped view of {@link #latestLines} instead of the raw cues.
+    private boolean combineLinesEnabled = false;
 
     private enum LangMode { EN, VI, BOTH }
 
@@ -135,6 +139,9 @@ public class PlayerActivity extends AppCompatActivity
     private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
     private SubtitleState state = SubtitleState.LOADING;
     private List<SubtitleLine> latestLines = Collections.emptyList();
+    // Sentence-grouped projection of {@link #latestLines}. Rebuilt whenever
+    // the cue list or its translations change.
+    private List<SubtitleLine> sentenceLines = Collections.emptyList();
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -177,8 +184,7 @@ public class PlayerActivity extends AppCompatActivity
         btnBookmarkLine = findViewById(R.id.btn_bookmark_line);
         btnLangMode = findViewById(R.id.btn_lang_mode);
 
-        btnCombineLines.setOnClickListener(v ->
-                Toast.makeText(this, R.string.combine_not_yet, Toast.LENGTH_SHORT).show());
+        btnCombineLines.setOnClickListener(v -> toggleCombineLines());
 
         btnLoopLine.setOnClickListener(v -> toggleLoopLine());
 
@@ -215,6 +221,7 @@ public class PlayerActivity extends AppCompatActivity
                 loopEndMs = line.endMs;
             }
         });
+        adapter.setOnWordLongPressListener(this::openDictionarySheet);
 
         btnRetryFetch.setOnClickListener(v -> {
             state = SubtitleState.LOADING;
@@ -308,6 +315,7 @@ public class PlayerActivity extends AppCompatActivity
         loopStartMs = -1L;
         loopEndMs = -1L;
         if (btnLoopLine != null) btnLoopLine.setSelected(false);
+        sentenceLines = Collections.emptyList();
     }
 
     private void handleNavigation(@Nullable String url) {
@@ -378,7 +386,7 @@ public class PlayerActivity extends AppCompatActivity
                 subtitleProgress.setVisibility(View.GONE);
                 bannerNoSubtitle.setVisibility(View.GONE);
                 btnRetryFetch.setVisibility(View.GONE);
-                adapter.submit(latestLines);
+                adapter.submit(activeLines());
                 break;
             case NO_SUBTITLE:
                 subtitleProgress.setVisibility(View.GONE);
@@ -550,8 +558,73 @@ public class PlayerActivity extends AppCompatActivity
 
     @Nullable
     private SubtitleLine currentActiveLine() {
-        if (activeLineIndex < 0 || activeLineIndex >= latestLines.size()) return null;
-        return latestLines.get(activeLineIndex);
+        List<SubtitleLine> list = activeLines();
+        if (activeLineIndex < 0 || activeLineIndex >= list.size()) return null;
+        return list.get(activeLineIndex);
+    }
+
+    /** Whichever projection of the subtitle track is currently being shown. */
+    @NonNull
+    private List<SubtitleLine> activeLines() {
+        return combineLinesEnabled ? sentenceLines : latestLines;
+    }
+
+    /**
+     * Sprint 4: toggle between cue-level and sentence-level views. The active
+     * highlight is translated across modes so the user keeps their place,
+     * and the loop scope is cancelled because it refers to a specific line
+     * in the previous projection.
+     */
+    private void toggleCombineLines() {
+        int prevActive = activeLineIndex;
+        boolean wasCombineEnabled = combineLinesEnabled;
+
+        combineLinesEnabled = !combineLinesEnabled;
+        if (btnCombineLines != null) btnCombineLines.setSelected(combineLinesEnabled);
+
+        loopLineEnabled = false;
+        loopStartMs = -1L;
+        loopEndMs = -1L;
+        if (btnLoopLine != null) btnLoopLine.setSelected(false);
+
+        int newActive;
+        if (!wasCombineEnabled) {
+            newActive = SentenceJoiner.sentenceIndexForCue(latestLines, prevActive);
+        } else {
+            newActive = SentenceJoiner.firstCueIndexForSentence(latestLines, prevActive);
+        }
+
+        List<SubtitleLine> next = activeLines();
+        syncController.attach(next);
+        activeLineIndex = newActive;
+        if (adapter != null) {
+            adapter.submit(next);
+            adapter.setActiveIndex(newActive);
+        }
+        if (newActive >= 0 && layoutManager != null
+                && getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) {
+            TopSmoothScroller scroller = new TopSmoothScroller(this);
+            scroller.setTargetPosition(newActive);
+            layoutManager.startSmoothScroll(scroller);
+        }
+    }
+
+    /**
+     * Sprint 4: open the dictionary BottomSheet for a long-pressed word.
+     * Auto-pauses the underlying video while the sheet is up so the user
+     * can read the definition without losing context, and resumes when
+     * the sheet is dismissed.
+     */
+    private void openDictionarySheet(@NonNull String word) {
+        if (isFinishing() || isDestroyed()) return;
+        if (webView != null) WebViewPlayerBridge.pause(webView);
+        DictionaryBottomSheet sheet = DictionaryBottomSheet.newInstance(word);
+        sheet.setOnDismissListener(() -> {
+            if (!isFinishing() && !isDestroyed() && webView != null) {
+                WebViewPlayerBridge.play(webView);
+            }
+        });
+        sheet.show(getSupportFragmentManager(), DictionaryBottomSheet.TAG);
     }
 
     // --- Subtitle fetch ------------------------------------------------------
@@ -600,8 +673,9 @@ public class PlayerActivity extends AppCompatActivity
 
     private void applyLines(@NonNull List<SubtitleLine> lines) {
         latestLines = lines;
+        sentenceLines = SentenceJoiner.join(lines);
         state = SubtitleState.READY;
-        syncController.attach(lines);
+        syncController.attach(activeLines());
         applyStateToSheet();
         // Kick off (or resume from cache) the EN→VI translation pass so the
         // user can flip to VI / Both via the lang button without waiting.
@@ -758,7 +832,20 @@ public class PlayerActivity extends AppCompatActivity
         for (int i = 0; i < n; i++) {
             lines.get(i).textVi = translations.get(i);
         }
-        if (adapter != null) adapter.refreshTranslations();
+        // Sentence projection holds copies of cue text — rebuild it so the
+        // joined Vi shows up immediately when the user is in combine mode.
+        sentenceLines = SentenceJoiner.join(lines);
+        if (adapter == null) return;
+        if (combineLinesEnabled) {
+            int preserved = activeLineIndex;
+            adapter.submit(sentenceLines);
+            adapter.setActiveIndex(preserved);
+            // Re-attach so the sync controller's binary search references the
+            // new SubtitleLine instances (timings unchanged, identity changed).
+            syncController.attach(sentenceLines);
+        } else {
+            adapter.refreshTranslations();
+        }
     }
 
     // --- Lifecycle -----------------------------------------------------------
