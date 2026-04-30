@@ -1,8 +1,10 @@
 package com.joy.englishtube.ui.player;
 
 import android.annotation.SuppressLint;
+import android.app.Dialog;
 import android.content.Intent;
 import android.net.Uri;
+import android.content.res.Resources;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -12,6 +14,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -19,6 +22,8 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.joy.englishtube.R;
 
@@ -143,6 +148,28 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
         } catch (RuntimeException e) {
             Log.w(TAG, "open external failed", e);
         }
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        Dialog dialog = getDialog();
+        if (!(dialog instanceof BottomSheetDialog)) return;
+        FrameLayout sheet = ((BottomSheetDialog) dialog).findViewById(
+                com.google.android.material.R.id.design_bottom_sheet);
+        if (sheet == null) return;
+        // Make the sheet take up most of the screen so the embedded
+        // WebView is actually readable. Without this the sheet opens at
+        // its peek height (just the header), which is what the user
+        // reported in review.
+        ViewGroup.LayoutParams lp = sheet.getLayoutParams();
+        int target = (int) (Resources.getSystem().getDisplayMetrics().heightPixels * 0.92f);
+        lp.height = target;
+        sheet.setLayoutParams(lp);
+        BottomSheetBehavior<View> behavior = BottomSheetBehavior.from(sheet);
+        behavior.setSkipCollapsed(true);
+        behavior.setPeekHeight(target, false);
+        behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
     }
 
     @Override
