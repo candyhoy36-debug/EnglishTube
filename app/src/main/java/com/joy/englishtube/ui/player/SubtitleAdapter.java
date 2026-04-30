@@ -116,37 +116,23 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
             h.vi.setVisibility(View.GONE);
         }
 
+        // Active row gets ONLY a background swap — no bold / italic / color
+        // changes. Re-typesetting on every cue tick is visually jarring and
+        // makes EN and VI hard to tell apart. The background drawable plus
+        // the static text colors are enough to spot the active row.
         boolean active = position == activeIndex;
-        int activeColor = ContextCompat.getColor(h.itemView.getContext(),
-                R.color.brand_primary_dark);
         int normalColor = ContextCompat.getColor(h.itemView.getContext(),
                 R.color.text_primary);
         if (active) {
             h.itemView.setBackgroundResource(R.drawable.bg_subtitle_item_active);
-            h.en.setTextColor(activeColor);
-            h.en.setTypeface(null, Typeface.BOLD);
-            if (showEn && showVi) {
-                // EN+VI mode: keep EN as the bold blue "anchor", and show
-                // VI in a distinct teal italic so the two languages stay
-                // visually separate even on the active row.
-                int viActiveColor = ContextCompat.getColor(h.itemView.getContext(),
-                        R.color.subtitle_translation_active);
-                h.vi.setTextColor(viActiveColor);
-                h.vi.setTypeface(null, Typeface.ITALIC);
-            } else {
-                // VI-only or EN-only: the visible row takes the full EN-style
-                // active treatment so the highlight still reads.
-                h.vi.setTextColor(activeColor);
-                h.vi.setTypeface(null, Typeface.BOLD);
-            }
         } else {
             h.itemView.setBackgroundColor(0x00000000);
-            h.en.setTextColor(normalColor);
-            h.en.setTypeface(null, Typeface.NORMAL);
-            h.vi.setTextColor(ContextCompat.getColor(h.itemView.getContext(),
-                    R.color.text_secondary));
-            h.vi.setTypeface(null, Typeface.NORMAL);
         }
+        h.en.setTextColor(normalColor);
+        h.en.setTypeface(null, Typeface.NORMAL);
+        h.vi.setTextColor(ContextCompat.getColor(h.itemView.getContext(),
+                R.color.text_secondary));
+        h.vi.setTypeface(null, Typeface.NORMAL);
 
         h.itemView.setOnClickListener(v -> {
             if (clickListener != null) clickListener.onLineClick(h.getBindingAdapterPosition(), line);
