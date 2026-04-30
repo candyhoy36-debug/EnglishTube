@@ -221,6 +221,7 @@ public class PlayerActivity extends AppCompatActivity
                 loopEndMs = line.endMs;
             }
         });
+        adapter.setOnWordLongPressListener(this::openDictionarySheet);
 
         btnRetryFetch.setOnClickListener(v -> {
             state = SubtitleState.LOADING;
@@ -606,6 +607,24 @@ public class PlayerActivity extends AppCompatActivity
             scroller.setTargetPosition(newActive);
             layoutManager.startSmoothScroll(scroller);
         }
+    }
+
+    /**
+     * Sprint 4: open the dictionary BottomSheet for a long-pressed word.
+     * Auto-pauses the underlying video while the sheet is up so the user
+     * can read the definition without losing context, and resumes when
+     * the sheet is dismissed.
+     */
+    private void openDictionarySheet(@NonNull String word) {
+        if (isFinishing() || isDestroyed()) return;
+        if (webView != null) WebViewPlayerBridge.pause(webView);
+        DictionaryBottomSheet sheet = DictionaryBottomSheet.newInstance(word);
+        sheet.setOnDismissListener(() -> {
+            if (!isFinishing() && !isDestroyed() && webView != null) {
+                WebViewPlayerBridge.play(webView);
+            }
+        });
+        sheet.show(getSupportFragmentManager(), DictionaryBottomSheet.TAG);
     }
 
     // --- Subtitle fetch ------------------------------------------------------

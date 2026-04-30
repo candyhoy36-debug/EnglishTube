@@ -145,6 +145,30 @@ public class WebViewPlayerBridge {
         webView.evaluateJavascript(js, null);
     }
 
+    /**
+     * Sprint 4: pause the underlying {@code <video>} element. Used by the
+     * Dictionary BottomSheet so the user can read a definition without the
+     * video continuing under the sheet.
+     */
+    @UiThread
+    public static void pause(@NonNull WebView webView) {
+        webView.evaluateJavascript(
+                "(function(){var v=document.querySelector('video.video-stream')"
+                        + "||document.querySelector('video');"
+                        + "if(v && v.pause) v.pause();})();",
+                null);
+    }
+
+    /** Sprint 4: resume the underlying {@code <video>} element. */
+    @UiThread
+    public static void play(@NonNull WebView webView) {
+        webView.evaluateJavascript(
+                "(function(){var v=document.querySelector('video.video-stream')"
+                        + "||document.querySelector('video');"
+                        + "if(v && v.play) v.play();})();",
+                null);
+    }
+
     // --- @JavascriptInterface methods (called on JS thread) ------------------
 
     @JavascriptInterface
