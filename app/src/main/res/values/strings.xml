@@ -56,7 +56,8 @@
     <string name="download_srt_not_yet">Tải xuống SRT sẽ có ở sprint sau.</string>
 
     <!-- Sprint 4 dictionary BottomSheet -->
-    <string name="dictionary_close">Đóng từ điển</string>
     <string name="dictionary_open_external">Mở trong trình duyệt</string>
+    <string name="dictionary_save_word">Lưu từ này</string>
+    <string name="dictionary_save_not_yet">Tính năng lưu từ sẽ có ở sprint sau.</string>
     <string name="dictionary_long_press_hint">Giữ 1 từ trên dòng phụ đề để tra nghĩa.</string>
 </resources>

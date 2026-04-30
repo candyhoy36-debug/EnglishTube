@@ -33,6 +33,16 @@
             tools:text="hello" />
 
         <ImageButton
+            android:id="@+id/btn_dictionary_save"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/dictionary_save_word"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_bookmark"
+            app:tint="@color/text_secondary" />
+
+        <ImageButton
             android:id="@+id/btn_dictionary_open_external"
             android:layout_width="40dp"
             android:layout_height="40dp"
@@ -40,16 +50,6 @@
             android:contentDescription="@string/dictionary_open_external"
             android:scaleType="centerInside"
             android:src="@drawable/ic_open_in_new"
-            app:tint="@color/text_secondary" />
-
-        <ImageButton
-            android:id="@+id/btn_dictionary_close"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/dictionary_close"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_arrow_back"
             app:tint="@color/text_secondary" />
 
     </LinearLayout>

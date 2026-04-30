@@ -18,6 +18,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -87,13 +88,20 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
         String word = requireArguments().getString(ARG_WORD, "");
 
         TextView tvWord = view.findViewById(R.id.tv_dictionary_word);
-        ImageButton btnClose = view.findViewById(R.id.btn_dictionary_close);
+        ImageButton btnSave = view.findViewById(R.id.btn_dictionary_save);
         ImageButton btnExternal = view.findViewById(R.id.btn_dictionary_open_external);
         ProgressBar progress = view.findViewById(R.id.dictionary_progress);
         webView = view.findViewById(R.id.webview_dictionary);
 
         tvWord.setText(word);
-        btnClose.setOnClickListener(v -> dismiss());
+
+        // Save-word stub. Persisting the looked-up word into the user's
+        // vocab list is planned for a later sprint (likely alongside the
+        // history/bookmark store), so for now we just acknowledge the tap.
+        btnSave.setOnClickListener(v ->
+                Toast.makeText(v.getContext(),
+                        R.string.dictionary_save_not_yet,
+                        Toast.LENGTH_SHORT).show());
 
         String url = buildLookupUrl(word);
         btnExternal.setOnClickListener(v -> openExternal(url));
