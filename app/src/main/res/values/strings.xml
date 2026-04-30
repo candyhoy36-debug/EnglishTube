@@ -59,5 +59,6 @@
     <string name="dictionary_open_external">Mở trong trình duyệt</string>
     <string name="dictionary_save_word">Lưu từ này</string>
     <string name="dictionary_save_not_yet">Tính năng lưu từ sẽ có ở sprint sau.</string>
+    <string name="dictionary_history_back">Quay lại trang trước</string>
     <string name="dictionary_long_press_hint">Giữ 1 từ trên dòng phụ đề để tra nghĩa.</string>
 </resources>

@@ -5,8 +5,10 @@ import android.app.Dialog;
 import android.content.Intent;
 import android.net.Uri;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -67,6 +69,8 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
     private OnDismissListener dismissListener;
     @Nullable
     private WebView webView;
+    @Nullable
+    private ImageButton btnBack;
 
     public void setOnDismissListener(@Nullable OnDismissListener l) {
         this.dismissListener = l;
@@ -92,8 +96,13 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
         ImageButton btnExternal = view.findViewById(R.id.btn_dictionary_open_external);
         ProgressBar progress = view.findViewById(R.id.dictionary_progress);
         webView = view.findViewById(R.id.webview_dictionary);
+        btnBack = view.findViewById(R.id.btn_dictionary_back);
 
         tvWord.setText(word);
+
+        btnBack.setOnClickListener(v -> {
+            if (webView != null && webView.canGoBack()) webView.goBack();
+        });
 
         // Save-word stub. Persisting the looked-up word into the user's
         // vocab list is planned for a later sprint (likely alongside the
@@ -124,11 +133,21 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, String href) {
-                // Keep navigation inside the BottomSheet's WebView for the
-                // Google results page; let the system handle anything else
-                // (e.g. dictionary site links the user actually clicks
-                // intentionally — they get full Chrome).
+                // Keep all in-WebView clicks inside the sheet so the user
+                // can navigate the Google results / dictionary sites and
+                // come back via the in-sheet back button. The external
+                // "open in browser" button is the explicit escape hatch.
                 return false;
+            }
+
+            @Override
+            public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                refreshBackButton();
+            }
+
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                refreshBackButton();
             }
         });
 
@@ -163,13 +182,27 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
         super.onStart();
         Dialog dialog = getDialog();
         if (!(dialog instanceof BottomSheetDialog)) return;
+
+        // Intercept the system Back key so it walks the WebView's history
+        // first. Only when the WebView has nothing to go back to do we
+        // let Back close the sheet.
+        dialog.setOnKeyListener((d, keyCode, event) -> {
+            if (keyCode == KeyEvent.KEYCODE_BACK
+                    && event.getAction() == KeyEvent.ACTION_UP
+                    && webView != null && webView.canGoBack()) {
+                webView.goBack();
+                return true;
+            }
+            return false;
+        });
+
         FrameLayout sheet = ((BottomSheetDialog) dialog).findViewById(
                 com.google.android.material.R.id.design_bottom_sheet);
         if (sheet == null) return;
         // Make the sheet take up most of the screen so the embedded
-        // WebView is actually readable. Without this the sheet opens at
-        // its peek height (just the header), which is what the user
-        // reported in review.
+        // WebView is actually readable. Body drags are disabled so the
+        // WebView keeps its own scroll — the BottomSheetDragHandleView
+        // at the top of the layout handles drag-to-dismiss for the user.
         ViewGroup.LayoutParams lp = sheet.getLayoutParams();
         int target = (int) (Resources.getSystem().getDisplayMetrics().heightPixels * 0.92f);
         lp.height = target;
@@ -178,6 +211,12 @@ public class DictionaryBottomSheet extends BottomSheetDialogFragment {
         behavior.setSkipCollapsed(true);
         behavior.setPeekHeight(target, false);
         behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+        behavior.setDraggable(false);
+    }
+
+    private void refreshBackButton() {
+        if (btnBack == null || webView == null) return;
+        btnBack.setVisibility(webView.canGoBack() ? View.VISIBLE : View.GONE);
     }
 
     @Override
