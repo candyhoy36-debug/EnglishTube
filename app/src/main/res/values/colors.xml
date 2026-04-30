@@ -12,6 +12,9 @@
     <color name="surface_variant">#FFF5F5F5</color>
 
     <color name="subtitle_active_bg">#1F1976D2</color>
+    <!-- Active VI line in EN+VI mode. Distinct teal so it doesn't merge
+         visually with the brand-blue active EN line above it. -->
+    <color name="subtitle_translation_active">#FF00897B</color>
 
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>

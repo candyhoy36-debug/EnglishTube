@@ -125,10 +125,20 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
             h.itemView.setBackgroundResource(R.drawable.bg_subtitle_item_active);
             h.en.setTextColor(activeColor);
             h.en.setTypeface(null, Typeface.BOLD);
-            // Highlight VI too — when EN is hidden in VI-only mode the bold
-            // accent must still travel with the active row.
-            h.vi.setTextColor(activeColor);
-            h.vi.setTypeface(null, Typeface.BOLD);
+            if (showEn && showVi) {
+                // EN+VI mode: keep EN as the bold blue "anchor", and show
+                // VI in a distinct teal italic so the two languages stay
+                // visually separate even on the active row.
+                int viActiveColor = ContextCompat.getColor(h.itemView.getContext(),
+                        R.color.subtitle_translation_active);
+                h.vi.setTextColor(viActiveColor);
+                h.vi.setTypeface(null, Typeface.ITALIC);
+            } else {
+                // VI-only or EN-only: the visible row takes the full EN-style
+                // active treatment so the highlight still reads.
+                h.vi.setTextColor(activeColor);
+                h.vi.setTypeface(null, Typeface.BOLD);
+            }
         } else {
             h.itemView.setBackgroundColor(0x00000000);
             h.en.setTextColor(normalColor);
