@@ -1,26 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    One row of the subtitle list:
+        [0:07]  Hello. This is …
+                (vi line under, when filled)
+
+    The pill on the left shows the cue's start time (mm:ss). The
+    text column is vertical so the EN/VI lines stack the way the
+    rest of the app expects.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
-    android:orientation="vertical"
-    android:paddingHorizontal="20dp"
+    android:gravity="top"
+    android:orientation="horizontal"
+    android:paddingHorizontal="16dp"
     android:paddingVertical="10dp">
 
     <TextView
-        android:id="@+id/tv_text_en"
-        android:layout_width="match_parent"
+        android:id="@+id/tv_timestamp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textAppearance="?attr/textAppearanceBody1"
-        android:textColor="@color/text_primary" />
-
-    <TextView
-        android:id="@+id/tv_text_vi"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_marginEnd="12dp"
         android:layout_marginTop="2dp"
-        android:textAppearance="?attr/textAppearanceBody2"
-        android:textColor="@color/text_secondary"
-        android:visibility="gone" />
+        android:background="@drawable/bg_subtitle_timestamp"
+        android:fontFeatureSettings="tnum"
+        android:minWidth="44dp"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp"
+        android:textAlignment="center"
+        android:textColor="@color/brand_primary_dark"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        tools:ignore="UnusedAttribute"
+        tools:text="0:07" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tv_text_en"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="?attr/textAppearanceBody1"
+            android:textColor="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/tv_text_vi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="?attr/textAppearanceBody2"
+            android:textColor="@color/text_secondary"
+            android:visibility="gone" />
+
+    </LinearLayout>
 
 </LinearLayout>

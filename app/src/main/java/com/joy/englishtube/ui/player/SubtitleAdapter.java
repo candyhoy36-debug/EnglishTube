@@ -68,6 +68,7 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
     @Override
     public void onBindViewHolder(@NonNull VH h, int position) {
         SubtitleLine line = lines.get(position);
+        h.timestamp.setText(formatTimestamp(line.startMs));
         h.en.setText(line.textEn);
         if (line.textVi != null && !line.textVi.isEmpty()) {
             h.vi.setText(line.textVi);
@@ -99,11 +100,30 @@ public class SubtitleAdapter extends RecyclerView.Adapter<SubtitleAdapter.VH> {
         return lines.size();
     }
 
+    /**
+     * Format a cue start time as either "M:SS" or "H:MM:SS" so very long
+     * videos still read naturally. Always pads seconds to two digits and
+     * minutes to two digits when an hour component is present.
+     */
+    private static String formatTimestamp(long startMs) {
+        long totalSec = Math.max(0, startMs / 1000L);
+        long hours = totalSec / 3600L;
+        long minutes = (totalSec % 3600L) / 60L;
+        long seconds = totalSec % 60L;
+        if (hours > 0) {
+            return String.format(java.util.Locale.US, "%d:%02d:%02d",
+                    hours, minutes, seconds);
+        }
+        return String.format(java.util.Locale.US, "%d:%02d", minutes, seconds);
+    }
+
     static class VH extends RecyclerView.ViewHolder {
+        final TextView timestamp;
         final TextView en;
         final TextView vi;
         VH(View v) {
             super(v);
+            timestamp = v.findViewById(R.id.tv_timestamp);
             en = v.findViewById(R.id.tv_text_en);
             vi = v.findViewById(R.id.tv_text_vi);
         }
