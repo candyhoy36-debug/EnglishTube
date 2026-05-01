@@ -363,6 +363,13 @@ public class PlayerActivity extends AppCompatActivity
                 // SPA transitions (auto-play next, redirects to login wall, …)
                 // still get hooked.
                 new WebViewPlayerBridge(PlayerActivity.this).install(v);
+                // Sprint 5: hide YT's own fullscreen button. We drive
+                // fullscreen from device rotation, and YT's button puts
+                // the page into a weird half-fullscreen state where
+                // the description and related videos still scroll
+                // underneath our overlay. Clean fix is to remove the
+                // button so users can't trigger that path.
+                hideYouTubeFullscreenButton(v);
                 // If the user tapped a different video inside the WebView
                 // (related video, autoplay queue, search result), the URL
                 // carries a new ?v=ID. Re-fetch subtitles so the bottom
@@ -370,6 +377,38 @@ public class PlayerActivity extends AppCompatActivity
                 handleNavigation(url);
             }
         });
+    }
+
+    /**
+     * Inject a CSS rule + MutationObserver that hides the YouTube
+     * mobile-web fullscreen button on every navigation. The observer is
+     * needed because YT's SPA re-renders the player chrome on video
+     * transitions, which would otherwise re-introduce the button.
+     */
+    private void hideYouTubeFullscreenButton(@NonNull WebView v) {
+        v.evaluateJavascript(
+                "(function(){"
+                        + "  if (window.__etubeHideFs) return;"
+                        + "  window.__etubeHideFs = true;"
+                        + "  var sel = '.fullscreen-icon, button.fullscreen-icon,'"
+                        + "          + ' .ytp-fullscreen-button,'"
+                        + "          + ' button[aria-label*=\"ull screen\"],'"
+                        + "          + ' button[aria-label*=\"ull-screen\"],'"
+                        + "          + ' button[aria-label*=\"o\\u00e0n m\\u00e0n\"]';"
+                        + "  var css = sel + '{display:none !important;visibility:hidden !important;pointer-events:none !important;}';"
+                        + "  function inject(){"
+                        + "    if (!document.head) return;"
+                        + "    if (document.getElementById('__etube_hide_fs')) return;"
+                        + "    var s = document.createElement('style');"
+                        + "    s.id = '__etube_hide_fs';"
+                        + "    s.textContent = css;"
+                        + "    document.head.appendChild(s);"
+                        + "  }"
+                        + "  inject();"
+                        + "  var mo = new MutationObserver(inject);"
+                        + "  mo.observe(document.documentElement, {childList:true, subtree:true});"
+                        + "})();",
+                null);
     }
 
     /**
