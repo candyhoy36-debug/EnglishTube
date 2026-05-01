@@ -133,7 +133,16 @@ public class PlayerActivity extends AppCompatActivity
     private View customView;
     @Nullable
     private WebChromeClient.CustomViewCallback customViewCallback;
+    // Native "app fullscreen" state — driven by device rotation.
+    // Independent of YouTube's HTML5 fullscreen (which may or may not
+    // succeed depending on the WebView's user-gesture policy). When this
+    // is true we have hidden the action bar / FAB / subtitle panel /
+    // system bars and revealed the bilingual overlay.
     private boolean isFullscreen = false;
+    // Sub-views we toggle on rotate — cached in onCreate to avoid
+    // findViewById on every config change.
+    private View playerActionBar;
+    private int savedSubtitlePanelVisibility = View.GONE;
 
     // --- Auxiliary feature state ---
     private int activeLineIndex = -1;
@@ -185,6 +194,7 @@ public class PlayerActivity extends AppCompatActivity
         subtitleOverlay = findViewById(R.id.subtitle_overlay);
         tvOverlayEn = findViewById(R.id.tv_overlay_en);
         tvOverlayVi = findViewById(R.id.tv_overlay_vi);
+        playerActionBar = findViewById(R.id.player_action_bar);
 
         // Use the modern back-press dispatcher so we can intercept Back to
         // exit fullscreen first (instead of letting the activity finish).
@@ -192,13 +202,22 @@ public class PlayerActivity extends AppCompatActivity
             @Override
             public void handleOnBackPressed() {
                 if (isFullscreen) {
-                    exitFullscreen();
+                    exitAppFullscreen();
                     return;
                 }
                 setEnabled(false);
                 getOnBackPressedDispatcher().onBackPressed();
             }
         });
+
+        // If the user launched the activity already in landscape (e.g. the
+        // device is sideways from the start), enter fullscreen immediately.
+        if (getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE) {
+            // Defer so initial layout has happened first — otherwise the
+            // overlay's bringToFront races with ConstraintLayout's pass.
+            getWindow().getDecorView().post(this::enterAppFullscreen);
+        }
 
         bindActionBar();
         bindSubtitlePanel();
@@ -316,12 +335,12 @@ public class PlayerActivity extends AppCompatActivity
 
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
-                enterFullscreen(view, callback);
+                mountCustomView(view, callback);
             }
 
             @Override
             public void onHideCustomView() {
-                exitFullscreen();
+                unmountCustomView();
             }
         });
 
@@ -674,24 +693,26 @@ public class PlayerActivity extends AppCompatActivity
      * landscape, and reveal the bilingual overlay so the user can keep
      * reading subtitles while the YouTube UI takes over.
      */
-    private void enterFullscreen(@NonNull View view, @NonNull WebChromeClient.CustomViewCallback callback) {
-        // Defensive: YouTube may double-fire onShowCustomView between SPA
-        // navigations. Drop the second one cleanly so we don't leak the
-        // first customView.
-        if (customView != null) {
-            callback.onCustomViewHidden();
-            return;
-        }
-
-        customView = view;
-        customViewCallback = callback;
+    /**
+     * Native app-fullscreen flow (Sprint 5): hides the action bar / FAB /
+     * subtitle panel / system bars and shows the bilingual overlay.
+     * Triggered by device rotation — we don't depend on YouTube's HTML5
+     * fullscreen API succeeding (the WebView often blocks
+     * {@code requestFullscreen()} for lack of a user gesture). We still
+     * fire the JS request so that, when it does succeed, YouTube's own
+     * fullscreen video chrome takes over inside the WebView.
+     */
+    private void enterAppFullscreen() {
+        if (isFullscreen) return;
         isFullscreen = true;
 
-        // We don't force the orientation — the user's device auto-rotate
-        // setting drives portrait/landscape, and onConfigurationChanged()
-        // is what triggered fullscreen in the first place. Forcing
-        // SENSOR_LANDSCAPE here would make rotate-back-to-portrait
-        // a no-op until the user toggles fullscreen out manually.
+        if (playerActionBar != null) playerActionBar.setVisibility(View.GONE);
+        if (webProgress != null) webProgress.setVisibility(View.GONE);
+        if (fabSubtitles != null) fabSubtitles.setVisibility(View.GONE);
+        if (subtitlePanel != null) {
+            savedSubtitlePanelVisibility = subtitlePanel.getVisibility();
+            subtitlePanel.setVisibility(View.GONE);
+        }
 
         Window window = getWindow();
         WindowCompat.setDecorFitsSystemWindows(window, false);
@@ -702,30 +723,79 @@ public class PlayerActivity extends AppCompatActivity
         ctrl.hide(WindowInsetsCompat.Type.systemBars());
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
+        subtitleOverlay.setVisibility(View.VISIBLE);
+        subtitleOverlay.bringToFront();
+        updateOverlayText();
+
+        // Best-effort: ask YouTube to enter HTML5 fullscreen on its <video>
+        // element. If it succeeds, mountCustomView() takes over the
+        // fullscreen_container; if not, we still have the app-level
+        // fullscreen with overlay above.
+        requestVideoFullscreen();
+    }
+
+    private void exitAppFullscreen() {
+        if (!isFullscreen) return;
+        isFullscreen = false;
+
+        // Tear down YT customView first so it doesn't briefly flash on
+        // top of the restored chrome.
+        if (customView != null) unmountCustomView();
+        else exitVideoFullscreen();
+
+        if (playerActionBar != null) playerActionBar.setVisibility(View.VISIBLE);
+        if (fabSubtitles != null) fabSubtitles.setVisibility(View.VISIBLE);
+        if (subtitlePanel != null) {
+            subtitlePanel.setVisibility(savedSubtitlePanelVisibility);
+        }
+
+        subtitleOverlay.setVisibility(View.GONE);
+
+        Window window = getWindow();
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        WindowCompat.setDecorFitsSystemWindows(window, true);
+        WindowInsetsControllerCompat ctrl =
+                WindowCompat.getInsetsController(window, window.getDecorView());
+        ctrl.show(WindowInsetsCompat.Type.systemBars());
+    }
+
+    /**
+     * Mounts the YouTube-supplied native view on top of the app chrome
+     * when YT successfully enters HTML5 fullscreen on the &lt;video&gt;
+     * element. Mounting only — the system-bar hiding and overlay reveal
+     * happen in {@link #enterAppFullscreen} which is the source of truth
+     * for fullscreen state.
+     */
+    private void mountCustomView(@NonNull View view, @NonNull WebChromeClient.CustomViewCallback callback) {
+        if (customView != null) {
+            callback.onCustomViewHidden();
+            return;
+        }
+        customView = view;
+        customViewCallback = callback;
+
         fullscreenContainer.removeAllViews();
         fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         fullscreenContainer.setVisibility(View.VISIBLE);
         fullscreenContainer.bringToFront();
-        subtitleOverlay.setVisibility(View.VISIBLE);
-        subtitleOverlay.bringToFront();
-
-        updateOverlayText();
+        // Keep the overlay above the customView so the user can still
+        // read EN/VI subtitles over the YT video.
+        if (isFullscreen) {
+            subtitleOverlay.bringToFront();
+        } else {
+            // YT entered fullscreen on its own (user tapped the button).
+            // Mirror app fullscreen so chrome is hidden and overlay is up.
+            enterAppFullscreen();
+            subtitleOverlay.bringToFront();
+        }
     }
 
-    /**
-     * Mirror of {@link #enterFullscreen}. Restores the activity's portrait
-     * orientation, brings the system bars back, and tears down the YouTube
-     * customView. Safe to call multiple times.
-     */
-    private void exitFullscreen() {
-        if (!isFullscreen && customView == null) return;
-        isFullscreen = false;
-
+    private void unmountCustomView() {
+        if (customView == null) return;
         fullscreenContainer.setVisibility(View.GONE);
         fullscreenContainer.removeAllViews();
-        subtitleOverlay.setVisibility(View.GONE);
 
         if (customViewCallback != null) {
             try {
@@ -736,13 +806,6 @@ public class PlayerActivity extends AppCompatActivity
         }
         customView = null;
         customViewCallback = null;
-
-        Window window = getWindow();
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        WindowCompat.setDecorFitsSystemWindows(window, true);
-        WindowInsetsControllerCompat ctrl =
-                WindowCompat.getInsetsController(window, window.getDecorView());
-        ctrl.show(WindowInsetsCompat.Type.systemBars());
     }
 
     /**
@@ -802,14 +865,13 @@ public class PlayerActivity extends AppCompatActivity
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        // Auto-rotate UX (Sprint 5 follow-up): rotating the device to
-        // landscape opens video fullscreen automatically and rotating
-        // back to portrait closes it. The actual app UI flips happen
-        // inside enter/exitFullscreen() via the WebChromeClient.
+        // Auto-rotate UX (Sprint 5): rotating the device to landscape
+        // hides the app chrome + system bars and reveals the bilingual
+        // overlay; rotating back to portrait restores everything.
         if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            if (!isFullscreen) requestVideoFullscreen();
+            enterAppFullscreen();
         } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
-            if (isFullscreen) exitVideoFullscreen();
+            exitAppFullscreen();
         }
     }
 
@@ -1107,7 +1169,7 @@ public class PlayerActivity extends AppCompatActivity
         // Make sure system bars / orientation come back before the activity
         // tears down — otherwise an in-flight fullscreen could leak the
         // landscape-locked rotation onto the next screen.
-        if (isFullscreen) exitFullscreen();
+        if (isFullscreen) exitAppFullscreen();
         syncController.detach();
         io.shutdownNow();
         if (webView != null) {
