@@ -371,6 +371,7 @@
         android:id="@+id/subtitle_overlay"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp"
         android:background="@color/overlay_scrim"
         android:clickable="false"
         android:focusable="false"
@@ -381,7 +382,8 @@
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintWidth_percent="0.7">
 
         <TextView
             android:id="@+id/tv_overlay_en"
