@@ -108,6 +108,7 @@ public class PlayerActivity extends AppCompatActivity
     // Auxiliary action bar buttons (top of activity, replaces the
     // old MaterialToolbar).
     private TextView btnCombineLines;
+    private TextView btnCombineLinesStrict;
     private TextView btnLoopLine;
     private TextView btnBookmarkLine;
     private TextView btnLangMode;
@@ -162,9 +163,13 @@ public class PlayerActivity extends AppCompatActivity
     private long loopStartMs = -1L;
     private long loopEndMs = -1L;
     private LangMode langMode = LangMode.EN;
-    // Sprint 4: when true, the panel + sync controller operate on a
-    // sentence-grouped view of {@link #latestLines} instead of the raw cues.
-    private boolean combineLinesEnabled = false;
+    // Sprint 4 + Sprint 5 follow-up: combine mode has three states. NONE
+    // shows raw cues; MODE1 ("Ghép câu") flushes a sentence whenever a
+    // cue's text ends on .?!… (cue-aligned, longer sentences); MODE2
+    // ("Ghép câu 2") splits at every terminator regardless of cue
+    // boundaries (mid-cue split, shorter sentences).
+    private enum CombineMode { NONE, MODE1, MODE2 }
+    private CombineMode combineMode = CombineMode.NONE;
 
     private enum LangMode { EN, VI, BOTH }
 
@@ -182,9 +187,12 @@ public class PlayerActivity extends AppCompatActivity
     private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
     private SubtitleState state = SubtitleState.LOADING;
     private List<SubtitleLine> latestLines = Collections.emptyList();
-    // Sentence-grouped projection of {@link #latestLines}. Rebuilt whenever
-    // the cue list or its translations change.
+    // Sentence-grouped projections of {@link #latestLines}. Rebuilt whenever
+    // the cue list or its translations change. {@link #sentenceLines} is the
+    // MODE1 (cue-aligned) view; {@link #sentenceLinesStrict} is the MODE2
+    // (mid-cue split) view.
     private List<SubtitleLine> sentenceLines = Collections.emptyList();
+    private List<SubtitleLine> sentenceLinesStrict = Collections.emptyList();
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -265,12 +273,15 @@ public class PlayerActivity extends AppCompatActivity
      */
     private void bindActionBar() {
         btnCombineLines = findViewById(R.id.btn_combine_lines);
+        btnCombineLinesStrict = findViewById(R.id.btn_combine_lines_strict);
         btnLoopLine = findViewById(R.id.btn_loop_line);
         btnBookmarkLine = findViewById(R.id.btn_bookmark_line);
         btnLangMode = findViewById(R.id.btn_lang_mode);
         btnEnterFullscreen = findViewById(R.id.btn_enter_fullscreen);
 
-        btnCombineLines.setOnClickListener(v -> toggleCombineLines());
+        btnCombineLines.setOnClickListener(v -> toggleCombineLinesMode1());
+
+        btnCombineLinesStrict.setOnClickListener(v -> toggleCombineLinesMode2());
 
         btnLoopLine.setOnClickListener(v -> toggleLoopLine());
 
@@ -502,6 +513,7 @@ public class PlayerActivity extends AppCompatActivity
         loopEndMs = -1L;
         if (btnLoopLine != null) btnLoopLine.setSelected(false);
         sentenceLines = Collections.emptyList();
+        sentenceLinesStrict = Collections.emptyList();
     }
 
     private void handleNavigation(@Nullable String url) {
@@ -818,39 +830,82 @@ public class PlayerActivity extends AppCompatActivity
     /** Whichever projection of the subtitle track is currently being shown. */
     @NonNull
     private List<SubtitleLine> activeLines() {
-        return combineLinesEnabled ? sentenceLines : latestLines;
+        switch (combineMode) {
+            case MODE1: return sentenceLines;
+            case MODE2: return sentenceLinesStrict;
+            default:    return latestLines;
+        }
     }
 
     /**
-     * Sprint 4: toggle between cue-level and sentence-level views. The active
-     * highlight is translated across modes so the user keeps their place,
-     * and the loop scope is cancelled because it refers to a specific line
-     * in the previous projection.
+     * Tap on the "Ghép câu" button: cycles MODE1 ↔ NONE. If MODE2 was on,
+     * we go straight to MODE1.
      */
-    private void toggleCombineLines() {
-        int prevActive = activeLineIndex;
-        boolean wasCombineEnabled = combineLinesEnabled;
+    private void toggleCombineLinesMode1() {
+        applyCombineMode(combineMode == CombineMode.MODE1
+                ? CombineMode.NONE
+                : CombineMode.MODE1);
+    }
 
-        combineLinesEnabled = !combineLinesEnabled;
-        if (btnCombineLines != null) btnCombineLines.setSelected(combineLinesEnabled);
+    /**
+     * Tap on the "Ghép câu 2" button: cycles MODE2 ↔ NONE, evicting MODE1.
+     */
+    private void toggleCombineLinesMode2() {
+        applyCombineMode(combineMode == CombineMode.MODE2
+                ? CombineMode.NONE
+                : CombineMode.MODE2);
+    }
+
+    /**
+     * Sprint 4: switch between cue-level and the two sentence-level views.
+     * The active highlight is translated across modes so the user keeps
+     * their place, and the loop scope is cancelled because it refers to a
+     * specific line in the previous projection.
+     */
+    private void applyCombineMode(CombineMode next) {
+        if (next == combineMode) return;
+        int prevActive = activeLineIndex;
+        CombineMode prev = combineMode;
+        combineMode = next;
+
+        if (btnCombineLines != null)
+            btnCombineLines.setSelected(combineMode == CombineMode.MODE1);
+        if (btnCombineLinesStrict != null)
+            btnCombineLinesStrict.setSelected(combineMode == CombineMode.MODE2);
 
         loopLineEnabled = false;
         loopStartMs = -1L;
         loopEndMs = -1L;
         if (btnLoopLine != null) btnLoopLine.setSelected(false);
 
-        int newActive;
-        if (!wasCombineEnabled) {
-            newActive = SentenceJoiner.sentenceIndexForCue(latestLines, prevActive);
+        // Translate the active index through whichever projection mapping
+        // applies. We always go through the raw cue index as the canonical
+        // anchor: if we're leaving a sentence view, map the sentence
+        // back to its first cue; if we're entering a sentence view, map
+        // the current cue forward to its sentence index.
+        int rawCueIndex;
+        if (prev == CombineMode.MODE1) {
+            rawCueIndex = SentenceJoiner.firstCueIndexForSentence(latestLines, prevActive);
+        } else if (prev == CombineMode.MODE2) {
+            rawCueIndex = SentenceJoiner.firstCueIndexForSentenceStrict(latestLines, prevActive);
         } else {
-            newActive = SentenceJoiner.firstCueIndexForSentence(latestLines, prevActive);
+            rawCueIndex = prevActive;
         }
 
-        List<SubtitleLine> next = activeLines();
-        syncController.attach(next);
+        int newActive;
+        if (combineMode == CombineMode.MODE1) {
+            newActive = SentenceJoiner.sentenceIndexForCue(latestLines, rawCueIndex);
+        } else if (combineMode == CombineMode.MODE2) {
+            newActive = SentenceJoiner.sentenceIndexForCueStrict(latestLines, rawCueIndex);
+        } else {
+            newActive = rawCueIndex;
+        }
+
+        List<SubtitleLine> nextList = activeLines();
+        syncController.attach(nextList);
         activeLineIndex = newActive;
         if (adapter != null) {
-            adapter.submit(next);
+            adapter.submit(nextList);
             adapter.setActiveIndex(newActive);
         }
         if (newActive >= 0 && layoutManager != null
@@ -1218,6 +1273,7 @@ public class PlayerActivity extends AppCompatActivity
     private void applyLines(@NonNull List<SubtitleLine> lines) {
         latestLines = lines;
         sentenceLines = SentenceJoiner.join(lines);
+        sentenceLinesStrict = SentenceJoiner.joinStrict(lines);
         state = SubtitleState.READY;
         syncController.attach(activeLines());
         applyStateToSheet();
@@ -1376,17 +1432,19 @@ public class PlayerActivity extends AppCompatActivity
         for (int i = 0; i < n; i++) {
             lines.get(i).textVi = translations.get(i);
         }
-        // Sentence projection holds copies of cue text — rebuild it so the
+        // Sentence projections hold copies of cue text — rebuild both so the
         // joined Vi shows up immediately when the user is in combine mode.
         sentenceLines = SentenceJoiner.join(lines);
+        sentenceLinesStrict = SentenceJoiner.joinStrict(lines);
         if (adapter == null) return;
-        if (combineLinesEnabled) {
+        if (combineMode != CombineMode.NONE) {
             int preserved = activeLineIndex;
-            adapter.submit(sentenceLines);
+            List<SubtitleLine> projection = activeLines();
+            adapter.submit(projection);
             adapter.setActiveIndex(preserved);
             // Re-attach so the sync controller's binary search references the
             // new SubtitleLine instances (timings unchanged, identity changed).
-            syncController.attach(sentenceLines);
+            syncController.attach(projection);
         } else {
             adapter.refreshTranslations();
         }

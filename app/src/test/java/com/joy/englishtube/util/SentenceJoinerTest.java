@@ -146,6 +146,60 @@ public class SentenceJoinerTest {
         assertEquals(-1, SentenceJoiner.sentenceIndexForCue(cues, -1));
     }
 
+    // --- Strict mode (Ghép câu 2) ------------------------------------------
+
+    @Test
+    public void joinStrictSplitsAtMidCueTerminator() {
+        // BBC pattern: a sentence ends inside a cue and the next sentence
+        // begins in the same cue ("...sweets, right? And the whole...").
+        List<SubtitleLine> cues = Arrays.asList(
+                new SubtitleLine(0, 1000, "you could charge anything you liked for"),
+                new SubtitleLine(1000, 2000, "your sweets, right? And the whole purpose"),
+                new SubtitleLine(2000, 3000, "of capitalism and competition.")
+        );
+        List<SubtitleLine> sentences = SentenceJoiner.joinStrict(cues);
+        assertEquals(2, sentences.size());
+        assertEquals("you could charge anything you liked for your sweets, right?",
+                sentences.get(0).textEn);
+        assertEquals("And the whole purpose of capitalism and competition.",
+                sentences.get(1).textEn);
+    }
+
+    @Test
+    public void joinStrictSplitsSelfContainedCueIntoMultiple() {
+        // Same input as mergesSentencesWithinSelfContainedCue, but strict
+        // mode SPLITS at every internal terminator instead of merging.
+        SubtitleLine a = new SubtitleLine(69_000L, 125_000L,
+                "Michelle Fleury. Hello, Michelle. Hello from Washington, DC.");
+        a.textVi = "Michelle Fleury. Xin chào, Michelle. Chào từ Washington, DC.";
+        List<SubtitleLine> sentences = SentenceJoiner.joinStrict(Arrays.asList(a));
+        assertEquals(3, sentences.size());
+        assertEquals("Michelle Fleury.", sentences.get(0).textEn);
+        assertEquals("Hello, Michelle.", sentences.get(1).textEn);
+        assertEquals("Hello from Washington, DC.", sentences.get(2).textEn);
+        // Mid-cue split → VI dropped on every resulting sentence.
+        assertNull(sentences.get(0).textVi);
+        assertNull(sentences.get(1).textVi);
+        assertNull(sentences.get(2).textVi);
+    }
+
+    @Test
+    public void joinStrictDoesNotSplitOnDecimal() {
+        List<SubtitleLine> cues = Arrays.asList(
+                new SubtitleLine(0, 1000, "Pi is roughly 3.14 you know."),
+                new SubtitleLine(1000, 2000, "Got it?")
+        );
+        List<SubtitleLine> sentences = SentenceJoiner.joinStrict(cues);
+        assertEquals(2, sentences.size());
+        assertEquals("Pi is roughly 3.14 you know.", sentences.get(0).textEn);
+    }
+
+    @Test
+    public void joinStrictKeepsEmptyInputEmpty() {
+        assertTrue(SentenceJoiner.joinStrict(null).isEmpty());
+        assertTrue(SentenceJoiner.joinStrict(Collections.emptyList()).isEmpty());
+    }
+
     @Test
     public void firstCueIndexForSentenceMapsBackward() {
         List<SubtitleLine> cues = Arrays.asList(
