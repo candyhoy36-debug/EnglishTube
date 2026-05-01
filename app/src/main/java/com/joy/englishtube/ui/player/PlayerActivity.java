@@ -3,7 +3,7 @@ package com.joy.englishtube.ui.player;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
@@ -133,7 +133,6 @@ public class PlayerActivity extends AppCompatActivity
     private View customView;
     @Nullable
     private WebChromeClient.CustomViewCallback customViewCallback;
-    private int savedRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
     private boolean isFullscreen = false;
 
     // --- Auxiliary feature state ---
@@ -688,8 +687,11 @@ public class PlayerActivity extends AppCompatActivity
         customViewCallback = callback;
         isFullscreen = true;
 
-        savedRequestedOrientation = getRequestedOrientation();
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        // We don't force the orientation — the user's device auto-rotate
+        // setting drives portrait/landscape, and onConfigurationChanged()
+        // is what triggered fullscreen in the first place. Forcing
+        // SENSOR_LANDSCAPE here would make rotate-back-to-portrait
+        // a no-op until the user toggles fullscreen out manually.
 
         Window window = getWindow();
         WindowCompat.setDecorFitsSystemWindows(window, false);
@@ -735,14 +737,80 @@ public class PlayerActivity extends AppCompatActivity
         customView = null;
         customViewCallback = null;
 
-        setRequestedOrientation(savedRequestedOrientation);
-
         Window window = getWindow();
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         WindowCompat.setDecorFitsSystemWindows(window, true);
         WindowInsetsControllerCompat ctrl =
                 WindowCompat.getInsetsController(window, window.getDecorView());
         ctrl.show(WindowInsetsCompat.Type.systemBars());
+    }
+
+    /**
+     * Sprint 5 (rotate-driven): when the device rotates we ask the
+     * YouTube page to enter / exit HTML5 fullscreen on the &lt;video&gt;
+     * element. Going through requestFullscreen() routes back into our
+     * {@link WebChromeClient#onShowCustomView}, which is the same path
+     * the manual fullscreen button uses — so we get the customView,
+     * the system bar hiding, and the overlay for free.
+     *
+     * Two fallbacks guard against requestFullscreen() being blocked by
+     * the user-gesture policy on certain WebView builds: we also try
+     * the iOS-style {@code webkitEnterFullscreen()} and finally a
+     * straight click on the player's fullscreen button.
+     */
+    private void requestVideoFullscreen() {
+        if (webView == null) return;
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "  var v = document.querySelector('video.video-stream')"
+                        + "        || document.querySelector('video');"
+                        + "  if (!v) return 'no-video';"
+                        + "  if (v.requestFullscreen) {"
+                        + "    try { v.requestFullscreen(); return 'request'; } catch(e) {}"
+                        + "  }"
+                        + "  if (v.webkitEnterFullscreen) {"
+                        + "    try { v.webkitEnterFullscreen(); return 'webkit'; } catch(e) {}"
+                        + "  }"
+                        + "  var btn = document.querySelector('button.fullscreen-icon')"
+                        + "        || document.querySelector('button[aria-label*=\"ull screen\"]')"
+                        + "        || document.querySelector('.ytp-fullscreen-button');"
+                        + "  if (btn) { btn.click(); return 'btn'; }"
+                        + "  return 'none';"
+                        + "})();",
+                null);
+    }
+
+    private void exitVideoFullscreen() {
+        if (webView == null) return;
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "  if (document.exitFullscreen) {"
+                        + "    try { document.exitFullscreen(); return 'exit'; } catch(e) {}"
+                        + "  }"
+                        + "  if (document.webkitExitFullscreen) {"
+                        + "    try { document.webkitExitFullscreen(); return 'webkit'; } catch(e) {}"
+                        + "  }"
+                        + "  var btn = document.querySelector('button.fullscreen-icon')"
+                        + "        || document.querySelector('button[aria-label*=\"xit\"]')"
+                        + "        || document.querySelector('.ytp-fullscreen-button');"
+                        + "  if (btn) { btn.click(); return 'btn'; }"
+                        + "  return 'none';"
+                        + "})();",
+                null);
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Auto-rotate UX (Sprint 5 follow-up): rotating the device to
+        // landscape opens video fullscreen automatically and rotating
+        // back to portrait closes it. The actual app UI flips happen
+        // inside enter/exitFullscreen() via the WebChromeClient.
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            if (!isFullscreen) requestVideoFullscreen();
+        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            if (isFullscreen) exitVideoFullscreen();
+        }
     }
 
     /**
