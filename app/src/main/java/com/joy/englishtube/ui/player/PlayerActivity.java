@@ -143,6 +143,14 @@ public class PlayerActivity extends AppCompatActivity
     // findViewById on every config change.
     private View playerActionBar;
     private int savedSubtitlePanelVisibility = View.GONE;
+    // Sprint 5 follow-up: tap-to-play/pause UI in fullscreen.
+    @Nullable
+    private FrameLayout fullscreenTapArea;
+    @Nullable
+    private android.widget.ImageView btnFullscreenPlayPause;
+    private boolean videoPlaying = true;
+    private final android.os.Handler mainHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
 
     // --- Auxiliary feature state ---
     private int activeLineIndex = -1;
@@ -195,6 +203,14 @@ public class PlayerActivity extends AppCompatActivity
         tvOverlayEn = findViewById(R.id.tv_overlay_en);
         tvOverlayVi = findViewById(R.id.tv_overlay_vi);
         playerActionBar = findViewById(R.id.player_action_bar);
+        fullscreenTapArea = findViewById(R.id.fullscreen_tap_area);
+        btnFullscreenPlayPause = findViewById(R.id.btn_fullscreen_play_pause);
+        if (fullscreenTapArea != null) {
+            fullscreenTapArea.setOnClickListener(v -> onFullscreenTap());
+        }
+        if (btnFullscreenPlayPause != null) {
+            btnFullscreenPlayPause.setOnClickListener(v -> onFullscreenTap());
+        }
 
         // Use the modern back-press dispatcher so we can intercept Back to
         // exit fullscreen first (instead of letting the activity finish).
@@ -611,6 +627,66 @@ public class PlayerActivity extends AppCompatActivity
         }
     }
 
+    @Override
+    public void onPlayState(boolean playing) {
+        videoPlaying = playing;
+        if (btnFullscreenPlayPause == null) return;
+        btnFullscreenPlayPause.setImageResource(playing
+                ? R.drawable.ic_pause_white
+                : R.drawable.ic_play_white);
+        if (!isFullscreen) return;
+        if (!playing) {
+            // While paused, keep the icon visible so the user can find
+            // it without tapping the screen first.
+            showFullscreenPlayPause(false);
+        } else {
+            scheduleHideFullscreenPlayPause();
+        }
+    }
+
+    /** Reveal the fullscreen play/pause button; auto-hide unless paused. */
+    private void showFullscreenPlayPause(boolean autoHide) {
+        if (btnFullscreenPlayPause == null) return;
+        btnFullscreenPlayPause.setVisibility(View.VISIBLE);
+        btnFullscreenPlayPause.bringToFront();
+        if (autoHide) scheduleHideFullscreenPlayPause();
+        else mainHandler.removeCallbacks(hideFullscreenPlayPause);
+    }
+
+    private void scheduleHideFullscreenPlayPause() {
+        if (btnFullscreenPlayPause == null) return;
+        mainHandler.removeCallbacks(hideFullscreenPlayPause);
+        // Only auto-hide while playing \u2014 if paused, the icon stays put
+        // so the user knows they can resume.
+        if (videoPlaying) {
+            mainHandler.postDelayed(hideFullscreenPlayPause, 1800L);
+        }
+    }
+
+    private final Runnable hideFullscreenPlayPause = () -> {
+        if (btnFullscreenPlayPause != null && videoPlaying) {
+            btnFullscreenPlayPause.setVisibility(View.GONE);
+        }
+    };
+
+    /**
+     * Tap-to-toggle handler for fullscreen mode. Each tap on the video
+     * area flips play/pause on the underlying YT &lt;video&gt; element
+     * and reveals the central play/pause button briefly.
+     */
+    private void onFullscreenTap() {
+        if (!isFullscreen || webView == null) return;
+        WebViewPlayerBridge.togglePlay(webView);
+        // Optimistic flip \u2014 the bridge poll will correct us within ~250ms.
+        videoPlaying = !videoPlaying;
+        if (btnFullscreenPlayPause != null) {
+            btnFullscreenPlayPause.setImageResource(videoPlaying
+                    ? R.drawable.ic_pause_white
+                    : R.drawable.ic_play_white);
+        }
+        showFullscreenPlayPause(videoPlaying);
+    }
+
     private void onActiveLineChanged(int newIndex) {
         activeLineIndex = newIndex;
         if (adapter == null || layoutManager == null) return;
@@ -815,6 +891,17 @@ public class PlayerActivity extends AppCompatActivity
         subtitleOverlay.bringToFront();
         updateOverlayText();
 
+        if (fullscreenTapArea != null) {
+            fullscreenTapArea.setVisibility(View.VISIBLE);
+            fullscreenTapArea.bringToFront();
+        }
+        // Reveal the play/pause button briefly on entry so the user
+        // discovers it; auto-fades while playing, persists when paused.
+        showFullscreenPlayPause(videoPlaying);
+        // Re-stack the subtitle overlay above the tap area so it stays
+        // on top of any other transient UI.
+        subtitleOverlay.bringToFront();
+
         // Hide the rest of the YT mobile page (header, description,
         // comments, related) so it doesn't bleed in behind the overlay
         // when the user has scrolled or YT's SPA has rerendered.
@@ -847,6 +934,9 @@ public class PlayerActivity extends AppCompatActivity
         }
 
         subtitleOverlay.setVisibility(View.GONE);
+        if (fullscreenTapArea != null) fullscreenTapArea.setVisibility(View.GONE);
+        if (btnFullscreenPlayPause != null) btnFullscreenPlayPause.setVisibility(View.GONE);
+        mainHandler.removeCallbacks(hideFullscreenPlayPause);
 
         Window window = getWindow();
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);

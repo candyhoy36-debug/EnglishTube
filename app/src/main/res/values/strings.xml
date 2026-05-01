@@ -62,4 +62,5 @@
     <string name="dictionary_history_back">Quay lại trang trước</string>
     <string name="dictionary_close">Đóng từ điển</string>
     <string name="dictionary_long_press_hint">Giữ 1 từ trên dòng phụ đề để tra nghĩa.</string>
+    <string name="cd_play_pause">Phát / Tạm dừng</string>
 </resources>

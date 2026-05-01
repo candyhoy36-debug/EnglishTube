@@ -47,6 +47,14 @@ public class WebViewPlayerBridge {
          * is laid out around it.
          */
         @UiThread void onVideoBottom(float cssPx);
+
+        /**
+         * Sprint 5 follow-up: fired when the &lt;video&gt; element's
+         * paused state flips. Lets the activity show the right icon on
+         * the fullscreen play/pause button and keep it visible while
+         * the video is paused.
+         */
+        @UiThread void onPlayState(boolean playing);
     }
 
     /** Name exposed to JS — referenced by {@link #JS_INSTALL}. */
@@ -69,6 +77,7 @@ public class WebViewPlayerBridge {
             + "  var notifiedReady = false;"
             + "  var lastHref = location.href;"
             + "  var lastBottom = -1;"
+            + "  var lastPaused = null;"
             + "  if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onLocation) {"
             + "    window." + "NAME_PLACEHOLDER" + ".onLocation(lastHref);"
             + "  }"
@@ -100,6 +109,13 @@ public class WebViewPlayerBridge {
             + "          if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onVideoBottom) {"
             + "            window." + "NAME_PLACEHOLDER" + ".onVideoBottom(b);"
             + "          }"
+            + "        }"
+            + "      }"
+            + "      var paused = !!v.paused;"
+            + "      if (paused !== lastPaused) {"
+            + "        lastPaused = paused;"
+            + "        if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onPlayState) {"
+            + "          window." + "NAME_PLACEHOLDER" + ".onPlayState(!paused);"
             + "        }"
             + "      }"
             + "      var t = v.currentTime;"
@@ -169,6 +185,22 @@ public class WebViewPlayerBridge {
                 null);
     }
 
+    /**
+     * Sprint 5 follow-up: toggle play/pause on the underlying
+     * {@code <video>}. Used by the fullscreen tap-to-toggle UI.
+     */
+    @UiThread
+    public static void togglePlay(@NonNull WebView webView) {
+        webView.evaluateJavascript(
+                "(function(){var v=document.querySelector('video.video-stream')"
+                        + "||document.querySelector('video');"
+                        + "if(!v) return;"
+                        + "if(v.paused){if(v.play) v.play();}"
+                        + "else{if(v.pause) v.pause();}"
+                        + "})();",
+                null);
+    }
+
     // --- @JavascriptInterface methods (called on JS thread) ------------------
 
     @JavascriptInterface
@@ -196,5 +228,11 @@ public class WebViewPlayerBridge {
     @WorkerThread
     public void onVideoBottom(float cssPx) {
         main.post(() -> callback.onVideoBottom(cssPx));
+    }
+
+    @JavascriptInterface
+    @WorkerThread
+    public void onPlayState(boolean playing) {
+        main.post(() -> callback.onPlayState(playing));
     }
 }
