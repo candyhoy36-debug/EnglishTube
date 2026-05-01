@@ -1085,13 +1085,16 @@ public class PlayerActivity extends AppCompatActivity
         // overlay; rotating back to portrait restores everything.
         if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
             enterAppFullscreen();
+            // While in landscape, keep whatever orientation lock the
+            // user requested (forced or sensor) — releasing here would
+            // immediately snap back to portrait when auto-rotate is off.
         } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
             exitAppFullscreen();
+            // Now that we're back in portrait, release any lock we set
+            // via the on-screen fullscreen-toggle button so the user's
+            // auto-rotate preference takes over for future rotations.
+            mainHandler.postDelayed(this::releaseOrientationLock, 600L);
         }
-        // If we forced an orientation via the on-screen toggle, release
-        // the lock once the system has finished rotating so the user
-        // can keep using auto-rotate naturally afterwards.
-        mainHandler.postDelayed(this::releaseOrientationLock, 600L);
     }
 
     /**
