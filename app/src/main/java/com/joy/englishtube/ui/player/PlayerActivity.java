@@ -894,12 +894,22 @@ public class PlayerActivity extends AppCompatActivity
         if (fullscreenTapArea != null) {
             fullscreenTapArea.setVisibility(View.VISIBLE);
             fullscreenTapArea.bringToFront();
+            // Force a high elevation so the WebView's hardware video
+            // surface (which is at z=0) doesn't punch through and hide
+            // these overlays. Without this, ImageView children drawn
+            // "above" the WebView in XML are still occluded by the
+            // SurfaceView-backed video.
+            fullscreenTapArea.setElevation(12f);
+        }
+        if (btnFullscreenPlayPause != null) {
+            btnFullscreenPlayPause.setElevation(16f);
         }
         // Reveal the play/pause button briefly on entry so the user
         // discovers it; auto-fades while playing, persists when paused.
         showFullscreenPlayPause(videoPlaying);
         // Re-stack the subtitle overlay above the tap area so it stays
         // on top of any other transient UI.
+        subtitleOverlay.setElevation(14f);
         subtitleOverlay.bringToFront();
 
         // Hide the rest of the YT mobile page (header, description,
