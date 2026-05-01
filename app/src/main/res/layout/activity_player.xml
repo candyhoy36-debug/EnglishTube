@@ -112,6 +112,24 @@
             android:textSize="11sp"
             app:drawableTint="@color/text_primary" />
 
+        <TextView
+            android:id="@+id/btn_enter_fullscreen"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_player_action_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_fullscreen"
+            android:drawablePadding="2dp"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="@string/action_enter_fullscreen"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp"
+            app:drawableTint="@color/text_primary" />
+
     </LinearLayout>
 
     <ProgressBar
@@ -396,6 +414,19 @@
             android:scaleType="fitCenter"
             android:src="@drawable/ic_play_white"
             android:visibility="gone" />
+
+        <ImageView
+            android:id="@+id/btn_exit_fullscreen"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/bg_fullscreen_play_pause"
+            android:contentDescription="@string/action_exit_fullscreen"
+            android:padding="10dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_fullscreen_exit" />
     </FrameLayout>
 
     <LinearLayout

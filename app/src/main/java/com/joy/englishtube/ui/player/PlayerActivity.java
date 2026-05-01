@@ -3,6 +3,7 @@ package com.joy.englishtube.ui.player;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -110,6 +111,7 @@ public class PlayerActivity extends AppCompatActivity
     private TextView btnLoopLine;
     private TextView btnBookmarkLine;
     private TextView btnLangMode;
+    private TextView btnEnterFullscreen;
 
     // Inline split-layout subtitle panel (Sprint 2 UI revamp — the
     // panel sits below the video instead of overlaying it via a
@@ -148,6 +150,8 @@ public class PlayerActivity extends AppCompatActivity
     private FrameLayout fullscreenTapArea;
     @Nullable
     private android.widget.ImageView btnFullscreenPlayPause;
+    @Nullable
+    private android.widget.ImageView btnExitFullscreen;
     private boolean videoPlaying = true;
     private final android.os.Handler mainHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
@@ -205,11 +209,17 @@ public class PlayerActivity extends AppCompatActivity
         playerActionBar = findViewById(R.id.player_action_bar);
         fullscreenTapArea = findViewById(R.id.fullscreen_tap_area);
         btnFullscreenPlayPause = findViewById(R.id.btn_fullscreen_play_pause);
+        btnExitFullscreen = findViewById(R.id.btn_exit_fullscreen);
         if (fullscreenTapArea != null) {
             fullscreenTapArea.setOnClickListener(v -> onFullscreenTap());
         }
         if (btnFullscreenPlayPause != null) {
             btnFullscreenPlayPause.setOnClickListener(v -> onFullscreenTap());
+        }
+        if (btnExitFullscreen != null) {
+            // Stop the click from propagating up to the tap area, which
+            // would otherwise toggle play/pause at the same time.
+            btnExitFullscreen.setOnClickListener(v -> requestFullscreenOrientation(false));
         }
 
         // Use the modern back-press dispatcher so we can intercept Back to
@@ -258,6 +268,7 @@ public class PlayerActivity extends AppCompatActivity
         btnLoopLine = findViewById(R.id.btn_loop_line);
         btnBookmarkLine = findViewById(R.id.btn_bookmark_line);
         btnLangMode = findViewById(R.id.btn_lang_mode);
+        btnEnterFullscreen = findViewById(R.id.btn_enter_fullscreen);
 
         btnCombineLines.setOnClickListener(v -> toggleCombineLines());
 
@@ -266,6 +277,8 @@ public class PlayerActivity extends AppCompatActivity
         btnBookmarkLine.setOnClickListener(v -> bookmarkActiveLine());
 
         btnLangMode.setOnClickListener(v -> cycleLangMode());
+
+        btnEnterFullscreen.setOnClickListener(v -> requestFullscreenOrientation(true));
         applyLangMode();
     }
 
@@ -904,6 +917,10 @@ public class PlayerActivity extends AppCompatActivity
         if (btnFullscreenPlayPause != null) {
             btnFullscreenPlayPause.setElevation(16f);
         }
+        if (btnExitFullscreen != null) {
+            btnExitFullscreen.setVisibility(View.VISIBLE);
+            btnExitFullscreen.setElevation(16f);
+        }
         // Reveal the play/pause button briefly on entry so the user
         // discovers it; auto-fades while playing, persists when paused.
         showFullscreenPlayPause(videoPlaying);
@@ -946,6 +963,7 @@ public class PlayerActivity extends AppCompatActivity
         subtitleOverlay.setVisibility(View.GONE);
         if (fullscreenTapArea != null) fullscreenTapArea.setVisibility(View.GONE);
         if (btnFullscreenPlayPause != null) btnFullscreenPlayPause.setVisibility(View.GONE);
+        if (btnExitFullscreen != null) btnExitFullscreen.setVisibility(View.GONE);
         mainHandler.removeCallbacks(hideFullscreenPlayPause);
 
         Window window = getWindow();
@@ -1069,6 +1087,30 @@ public class PlayerActivity extends AppCompatActivity
             enterAppFullscreen();
         } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
             exitAppFullscreen();
+        }
+        // If we forced an orientation via the on-screen toggle, release
+        // the lock once the system has finished rotating so the user
+        // can keep using auto-rotate naturally afterwards.
+        mainHandler.postDelayed(this::releaseOrientationLock, 600L);
+    }
+
+    /**
+     * Force the device into landscape (or portrait) regardless of the
+     * user's auto-rotate preference. The OS will fire
+     * {@link #onConfigurationChanged} once it finishes rotating, which
+     * drives enter/exitAppFullscreen via the same path as a free
+     * device rotation.
+     */
+    private void requestFullscreenOrientation(boolean enter) {
+        setRequestedOrientation(enter
+                ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+    }
+
+    /** Hand orientation control back to the device sensor / user setting. */
+    private void releaseOrientationLock() {
+        if (getRequestedOrientation() != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         }
     }
 
