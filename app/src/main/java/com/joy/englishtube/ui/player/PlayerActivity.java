@@ -380,33 +380,74 @@ public class PlayerActivity extends AppCompatActivity
     }
 
     /**
-     * Inject a CSS rule + MutationObserver that hides the YouTube
-     * mobile-web fullscreen button on every navigation. The observer is
-     * needed because YT's SPA re-renders the player chrome on video
-     * transitions, which would otherwise re-introduce the button.
+     * Inject (idempotently) a stylesheet that 1) hides YT's fullscreen
+     * button so users can't trigger its half-broken fullscreen path, and
+     * 2) defines a {@code html.__etube_fs} mask that hides everything
+     * outside the video player when we toggle that class on. Both rules
+     * are kept alive across YT's SPA navigations via a MutationObserver.
      */
     private void hideYouTubeFullscreenButton(@NonNull WebView v) {
         v.evaluateJavascript(
                 "(function(){"
-                        + "  if (window.__etubeHideFs) return;"
-                        + "  window.__etubeHideFs = true;"
-                        + "  var sel = '.fullscreen-icon, button.fullscreen-icon,'"
+                        + "  var fsBtn = '.fullscreen-icon, button.fullscreen-icon,'"
                         + "          + ' .ytp-fullscreen-button,'"
                         + "          + ' button[aria-label*=\"ull screen\"],'"
                         + "          + ' button[aria-label*=\"ull-screen\"],'"
                         + "          + ' button[aria-label*=\"o\\u00e0n m\\u00e0n\"]';"
-                        + "  var css = sel + '{display:none !important;visibility:hidden !important;pointer-events:none !important;}';"
+                        + "  var mask = '.mobile-topbar-header, ytm-mobile-topbar-renderer,'"
+                        + "          + ' header.bond-app-bar, .app-bar-renderer,'"
+                        + "          + ' ytm-pivot-bar-renderer,'"
+                        + "          + ' ytm-watch-metadata-section-renderer,'"
+                        + "          + ' ytm-engagement-panel-section-list-renderer,'"
+                        + "          + ' ytm-comment-section-renderer,'"
+                        + "          + ' ytm-item-section-renderer,'"
+                        + "          + ' ytm-related-content-renderer,'"
+                        + "          + ' ytm-shorts-shelf-renderer,'"
+                        + "          + ' ytm-rich-shelf-renderer,'"
+                        + "          + ' ytm-action-bar,'"
+                        + "          + ' ytm-watch-info-text,'"
+                        + "          + ' ytm-watch-channel-text,'"
+                        + "          + ' ytm-promoted-content-renderer,'"
+                        + "          + ' .player-info-section, .description-section,'"
+                        + "          + ' .related-section'"
+                        + "          ;"
+                        + "  var css = fsBtn + '{display:none !important;visibility:hidden !important;pointer-events:none !important;}'"
+                        + "          + 'html.__etube_fs, html.__etube_fs body{overflow:hidden !important;height:100vh !important;margin:0 !important;padding:0 !important;background:#000 !important;}'"
+                        + "          + 'html.__etube_fs ' + mask.split(',').join(', html.__etube_fs ') + '{display:none !important;}';"
                         + "  function inject(){"
                         + "    if (!document.head) return;"
-                        + "    if (document.getElementById('__etube_hide_fs')) return;"
+                        + "    if (document.getElementById('__etube_styles')) return;"
                         + "    var s = document.createElement('style');"
-                        + "    s.id = '__etube_hide_fs';"
+                        + "    s.id = '__etube_styles';"
                         + "    s.textContent = css;"
                         + "    document.head.appendChild(s);"
                         + "  }"
                         + "  inject();"
-                        + "  var mo = new MutationObserver(inject);"
-                        + "  mo.observe(document.documentElement, {childList:true, subtree:true});"
+                        + "  if (!window.__etubeMo) {"
+                        + "    window.__etubeMo = new MutationObserver(inject);"
+                        + "    window.__etubeMo.observe(document.documentElement, {childList:true, subtree:true});"
+                        + "  }"
+                        + "})();",
+                null);
+    }
+
+    /**
+     * Add / remove the {@code __etube_fs} class on the YT page's root
+     * element so the injected stylesheet hides everything outside the
+     * video player while we are in app-fullscreen.
+     */
+    private void setPlayerMask(boolean enabled) {
+        if (webView == null) return;
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "  var c = document.documentElement;"
+                        + "  if (!c) return;"
+                        + "  if (" + (enabled ? "true" : "false") + ") {"
+                        + "    c.classList.add('__etube_fs');"
+                        + "    window.scrollTo(0, 0);"
+                        + "  } else {"
+                        + "    c.classList.remove('__etube_fs');"
+                        + "  }"
                         + "})();",
                 null);
     }
@@ -766,6 +807,12 @@ public class PlayerActivity extends AppCompatActivity
         subtitleOverlay.bringToFront();
         updateOverlayText();
 
+        // Hide the rest of the YT mobile page (header, description,
+        // comments, related) so it doesn't bleed in behind the overlay
+        // when the user has scrolled or YT's SPA has rerendered.
+        if (webView != null) webView.scrollTo(0, 0);
+        setPlayerMask(true);
+
         // Best-effort: ask YouTube to enter HTML5 fullscreen on its <video>
         // element. If it succeeds, mountCustomView() takes over the
         // fullscreen_container; if not, we still have the app-level
@@ -781,6 +828,9 @@ public class PlayerActivity extends AppCompatActivity
         // top of the restored chrome.
         if (customView != null) unmountCustomView();
         else exitVideoFullscreen();
+
+        // Restore the YT mobile page (description, comments, ...).
+        setPlayerMask(false);
 
         if (playerActionBar != null) playerActionBar.setVisibility(View.VISIBLE);
         if (fabSubtitles != null) fabSubtitles.setVisibility(View.VISIBLE);
