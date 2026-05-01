@@ -421,7 +421,7 @@ public class PlayerActivity extends AppCompatActivity
                         + "          + 'html.__etube_fs, html.__etube_fs body{overflow:hidden !important;height:100vh !important;width:100vw !important;margin:0 !important;padding:0 !important;background:#000 !important;}'"
                         + "          + 'html.__etube_fs ' + mask.split(',').join(', html.__etube_fs ') + '{display:none !important;}'"
                         + "          + stretchCss"
-                        + "          + 'html.__etube_fs video{width:100vw !important;height:100vh !important;max-width:none !important;max-height:none !important;object-fit:contain !important;background:#000 !important;}';"
+                        + "          + 'html.__etube_fs video, html.__etube_fs video.html5-main-video, html.__etube_fs video.video-stream{position:fixed !important;top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;width:100vw !important;height:100vh !important;max-width:none !important;max-height:none !important;margin:0 !important;padding:0 !important;transform:none !important;object-fit:contain !important;background:#000 !important;z-index:1 !important;}';"
                         + "  function inject(){"
                         + "    if (!document.head) return;"
                         + "    if (document.getElementById('__etube_styles')) return;"
