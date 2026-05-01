@@ -36,6 +36,7 @@
 
     <!-- Player auxiliary action bar -->
     <string name="action_combine_lines">Ghép câu</string>
+    <string name="action_combine_lines_strict">Ghép câu 2</string>
     <string name="action_loop_line">Lặp dòng</string>
     <string name="action_bookmark_line">Bookmark</string>
     <string name="lang_mode_en">EN</string>
@@ -62,4 +63,7 @@
     <string name="dictionary_history_back">Quay lại trang trước</string>
     <string name="dictionary_close">Đóng từ điển</string>
     <string name="dictionary_long_press_hint">Giữ 1 từ trên dòng phụ đề để tra nghĩa.</string>
+    <string name="cd_play_pause">Phát / Tạm dừng</string>
+    <string name="action_enter_fullscreen">Toàn màn hình</string>
+    <string name="action_exit_fullscreen">Thoát toàn màn hình</string>
 </resources>

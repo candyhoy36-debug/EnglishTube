@@ -3,26 +3,36 @@ package com.joy.englishtube.ui.player;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.lifecycle.Lifecycle;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -98,9 +108,11 @@ public class PlayerActivity extends AppCompatActivity
     // Auxiliary action bar buttons (top of activity, replaces the
     // old MaterialToolbar).
     private TextView btnCombineLines;
+    private TextView btnCombineLinesStrict;
     private TextView btnLoopLine;
     private TextView btnBookmarkLine;
     private TextView btnLangMode;
+    private TextView btnEnterFullscreen;
 
     // Inline split-layout subtitle panel (Sprint 2 UI revamp — the
     // panel sits below the video instead of overlaying it via a
@@ -113,15 +125,51 @@ public class PlayerActivity extends AppCompatActivity
     private TextView bannerMessage;
     private Button btnRetryFetch;
 
+    // Sprint 5 fullscreen overlay state. The container hosts the WebView's
+    // HTML5-fullscreen customView; the overlay shows the active EN/VI line
+    // on top of the video while fullscreen is active.
+    private FrameLayout fullscreenContainer;
+    private LinearLayout subtitleOverlay;
+    private TextView tvOverlayEn;
+    private TextView tvOverlayVi;
+    @Nullable
+    private View customView;
+    @Nullable
+    private WebChromeClient.CustomViewCallback customViewCallback;
+    // Native "app fullscreen" state — driven by device rotation.
+    // Independent of YouTube's HTML5 fullscreen (which may or may not
+    // succeed depending on the WebView's user-gesture policy). When this
+    // is true we have hidden the action bar / FAB / subtitle panel /
+    // system bars and revealed the bilingual overlay.
+    private boolean isFullscreen = false;
+    // Sub-views we toggle on rotate — cached in onCreate to avoid
+    // findViewById on every config change.
+    private View playerActionBar;
+    private int savedSubtitlePanelVisibility = View.GONE;
+    // Sprint 5 follow-up: tap-to-play/pause UI in fullscreen.
+    @Nullable
+    private FrameLayout fullscreenTapArea;
+    @Nullable
+    private android.widget.ImageView btnFullscreenPlayPause;
+    @Nullable
+    private android.widget.ImageView btnExitFullscreen;
+    private boolean videoPlaying = true;
+    private final android.os.Handler mainHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+
     // --- Auxiliary feature state ---
     private int activeLineIndex = -1;
     private boolean loopLineEnabled = false;
     private long loopStartMs = -1L;
     private long loopEndMs = -1L;
     private LangMode langMode = LangMode.EN;
-    // Sprint 4: when true, the panel + sync controller operate on a
-    // sentence-grouped view of {@link #latestLines} instead of the raw cues.
-    private boolean combineLinesEnabled = false;
+    // Sprint 4 + Sprint 5 follow-up: combine mode has three states. NONE
+    // shows raw cues; MODE1 ("Ghép câu") flushes a sentence whenever a
+    // cue's text ends on .?!… (cue-aligned, longer sentences); MODE2
+    // ("Ghép câu 2") splits at every terminator regardless of cue
+    // boundaries (mid-cue split, shorter sentences).
+    private enum CombineMode { NONE, MODE1, MODE2 }
+    private CombineMode combineMode = CombineMode.NONE;
 
     private enum LangMode { EN, VI, BOTH }
 
@@ -139,9 +187,12 @@ public class PlayerActivity extends AppCompatActivity
     private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
     private SubtitleState state = SubtitleState.LOADING;
     private List<SubtitleLine> latestLines = Collections.emptyList();
-    // Sentence-grouped projection of {@link #latestLines}. Rebuilt whenever
-    // the cue list or its translations change.
+    // Sentence-grouped projections of {@link #latestLines}. Rebuilt whenever
+    // the cue list or its translations change. {@link #sentenceLines} is the
+    // MODE1 (cue-aligned) view; {@link #sentenceLinesStrict} is the MODE2
+    // (mid-cue split) view.
     private List<SubtitleLine> sentenceLines = Collections.emptyList();
+    private List<SubtitleLine> sentenceLinesStrict = Collections.emptyList();
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -159,6 +210,48 @@ public class PlayerActivity extends AppCompatActivity
         webView = findViewById(R.id.webview_player);
         webProgress = findViewById(R.id.web_progress);
         fabSubtitles = findViewById(R.id.fab_subtitles);
+        fullscreenContainer = findViewById(R.id.fullscreen_container);
+        subtitleOverlay = findViewById(R.id.subtitle_overlay);
+        tvOverlayEn = findViewById(R.id.tv_overlay_en);
+        tvOverlayVi = findViewById(R.id.tv_overlay_vi);
+        playerActionBar = findViewById(R.id.player_action_bar);
+        fullscreenTapArea = findViewById(R.id.fullscreen_tap_area);
+        btnFullscreenPlayPause = findViewById(R.id.btn_fullscreen_play_pause);
+        btnExitFullscreen = findViewById(R.id.btn_exit_fullscreen);
+        if (fullscreenTapArea != null) {
+            fullscreenTapArea.setOnClickListener(v -> onFullscreenTap());
+        }
+        if (btnFullscreenPlayPause != null) {
+            btnFullscreenPlayPause.setOnClickListener(v -> onFullscreenTap());
+        }
+        if (btnExitFullscreen != null) {
+            // Stop the click from propagating up to the tap area, which
+            // would otherwise toggle play/pause at the same time.
+            btnExitFullscreen.setOnClickListener(v -> requestFullscreenOrientation(false));
+        }
+
+        // Use the modern back-press dispatcher so we can intercept Back to
+        // exit fullscreen first (instead of letting the activity finish).
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (isFullscreen) {
+                    exitAppFullscreen();
+                    return;
+                }
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+            }
+        });
+
+        // If the user launched the activity already in landscape (e.g. the
+        // device is sideways from the start), enter fullscreen immediately.
+        if (getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE) {
+            // Defer so initial layout has happened first — otherwise the
+            // overlay's bringToFront races with ConstraintLayout's pass.
+            getWindow().getDecorView().post(this::enterAppFullscreen);
+        }
 
         bindActionBar();
         bindSubtitlePanel();
@@ -180,17 +273,23 @@ public class PlayerActivity extends AppCompatActivity
      */
     private void bindActionBar() {
         btnCombineLines = findViewById(R.id.btn_combine_lines);
+        btnCombineLinesStrict = findViewById(R.id.btn_combine_lines_strict);
         btnLoopLine = findViewById(R.id.btn_loop_line);
         btnBookmarkLine = findViewById(R.id.btn_bookmark_line);
         btnLangMode = findViewById(R.id.btn_lang_mode);
+        btnEnterFullscreen = findViewById(R.id.btn_enter_fullscreen);
 
-        btnCombineLines.setOnClickListener(v -> toggleCombineLines());
+        btnCombineLines.setOnClickListener(v -> toggleCombineLinesMode1());
+
+        btnCombineLinesStrict.setOnClickListener(v -> toggleCombineLinesMode2());
 
         btnLoopLine.setOnClickListener(v -> toggleLoopLine());
 
         btnBookmarkLine.setOnClickListener(v -> bookmarkActiveLine());
 
         btnLangMode.setOnClickListener(v -> cycleLangMode());
+
+        btnEnterFullscreen.setOnClickListener(v -> requestFullscreenOrientation(true));
         applyLangMode();
     }
 
@@ -273,6 +372,16 @@ public class PlayerActivity extends AppCompatActivity
                 webProgress.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
                 webProgress.setProgress(newProgress);
             }
+
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                mountCustomView(view, callback);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                unmountCustomView();
+            }
         });
 
         webView.setWebViewClient(new WebViewClient() {
@@ -294,6 +403,13 @@ public class PlayerActivity extends AppCompatActivity
                 // SPA transitions (auto-play next, redirects to login wall, …)
                 // still get hooked.
                 new WebViewPlayerBridge(PlayerActivity.this).install(v);
+                // Sprint 5: hide YT's own fullscreen button. We drive
+                // fullscreen from device rotation, and YT's button puts
+                // the page into a weird half-fullscreen state where
+                // the description and related videos still scroll
+                // underneath our overlay. Clean fix is to remove the
+                // button so users can't trigger that path.
+                hideYouTubeFullscreenButton(v);
                 // If the user tapped a different video inside the WebView
                 // (related video, autoplay queue, search result), the URL
                 // carries a new ?v=ID. Re-fetch subtitles so the bottom
@@ -301,6 +417,87 @@ public class PlayerActivity extends AppCompatActivity
                 handleNavigation(url);
             }
         });
+    }
+
+    /**
+     * Inject (idempotently) a stylesheet that 1) hides YT's fullscreen
+     * button so users can't trigger its half-broken fullscreen path, and
+     * 2) defines a {@code html.__etube_fs} mask that hides everything
+     * outside the video player when we toggle that class on. Both rules
+     * are kept alive across YT's SPA navigations via a MutationObserver.
+     */
+    private void hideYouTubeFullscreenButton(@NonNull WebView v) {
+        v.evaluateJavascript(
+                "(function(){"
+                        + "  var fsBtn = '.fullscreen-icon, button.fullscreen-icon,'"
+                        + "          + ' .ytp-fullscreen-button,'"
+                        + "          + ' button[aria-label*=\"ull screen\"],'"
+                        + "          + ' button[aria-label*=\"ull-screen\"],'"
+                        + "          + ' button[aria-label*=\"o\\u00e0n m\\u00e0n\"]';"
+                        + "  var mask = '.mobile-topbar-header, ytm-mobile-topbar-renderer,'"
+                        + "          + ' header.bond-app-bar, .app-bar-renderer,'"
+                        + "          + ' ytm-pivot-bar-renderer,'"
+                        + "          + ' ytm-watch-metadata-section-renderer,'"
+                        + "          + ' ytm-engagement-panel-section-list-renderer,'"
+                        + "          + ' ytm-comment-section-renderer,'"
+                        + "          + ' ytm-item-section-renderer,'"
+                        + "          + ' ytm-related-content-renderer,'"
+                        + "          + ' ytm-shorts-shelf-renderer,'"
+                        + "          + ' ytm-rich-shelf-renderer,'"
+                        + "          + ' ytm-action-bar,'"
+                        + "          + ' ytm-watch-info-text,'"
+                        + "          + ' ytm-watch-channel-text,'"
+                        + "          + ' ytm-promoted-content-renderer,'"
+                        + "          + ' .player-info-section, .description-section,'"
+                        + "          + ' .related-section'"
+                        + "          ;"
+                        + "  var stretch = 'ytm-player, ytm-player-container, #player, #player-container,'"
+                        + "          + ' .player-container, ytm-watch-player, ytm-watch-flexy,'"
+                        + "          + ' #movie_player, .html5-video-container';"
+                        + "  var stretchCss = stretch.split(',').map(function(s){"
+                        + "    return 'html.__etube_fs ' + s.trim();"
+                        + "  }).join(', ') + '{position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;max-width:none !important;max-height:none !important;margin:0 !important;padding:0 !important;z-index:1 !important;}';"
+                        + "  var css = fsBtn + '{display:none !important;visibility:hidden !important;pointer-events:none !important;}'"
+                        + "          + 'html.__etube_fs, html.__etube_fs body{overflow:hidden !important;height:100vh !important;width:100vw !important;margin:0 !important;padding:0 !important;background:#000 !important;}'"
+                        + "          + 'html.__etube_fs ' + mask.split(',').join(', html.__etube_fs ') + '{display:none !important;}'"
+                        + "          + stretchCss"
+                        + "          + 'html.__etube_fs video, html.__etube_fs video.html5-main-video, html.__etube_fs video.video-stream{position:fixed !important;top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;width:100vw !important;height:100vh !important;max-width:none !important;max-height:none !important;margin:0 !important;padding:0 !important;transform:none !important;object-fit:contain !important;background:#000 !important;z-index:1 !important;}';"
+                        + "  function inject(){"
+                        + "    if (!document.head) return;"
+                        + "    if (document.getElementById('__etube_styles')) return;"
+                        + "    var s = document.createElement('style');"
+                        + "    s.id = '__etube_styles';"
+                        + "    s.textContent = css;"
+                        + "    document.head.appendChild(s);"
+                        + "  }"
+                        + "  inject();"
+                        + "  if (!window.__etubeMo) {"
+                        + "    window.__etubeMo = new MutationObserver(inject);"
+                        + "    window.__etubeMo.observe(document.documentElement, {childList:true, subtree:true});"
+                        + "  }"
+                        + "})();",
+                null);
+    }
+
+    /**
+     * Add / remove the {@code __etube_fs} class on the YT page's root
+     * element so the injected stylesheet hides everything outside the
+     * video player while we are in app-fullscreen.
+     */
+    private void setPlayerMask(boolean enabled) {
+        if (webView == null) return;
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "  var c = document.documentElement;"
+                        + "  if (!c) return;"
+                        + "  if (" + (enabled ? "true" : "false") + ") {"
+                        + "    c.classList.add('__etube_fs');"
+                        + "    window.scrollTo(0, 0);"
+                        + "  } else {"
+                        + "    c.classList.remove('__etube_fs');"
+                        + "  }"
+                        + "})();",
+                null);
     }
 
     /**
@@ -316,6 +513,7 @@ public class PlayerActivity extends AppCompatActivity
         loopEndMs = -1L;
         if (btnLoopLine != null) btnLoopLine.setSelected(false);
         sentenceLines = Collections.emptyList();
+        sentenceLinesStrict = Collections.emptyList();
     }
 
     private void handleNavigation(@Nullable String url) {
@@ -454,10 +652,73 @@ public class PlayerActivity extends AppCompatActivity
         }
     }
 
+    @Override
+    public void onPlayState(boolean playing) {
+        videoPlaying = playing;
+        if (btnFullscreenPlayPause == null) return;
+        btnFullscreenPlayPause.setImageResource(playing
+                ? R.drawable.ic_pause_white
+                : R.drawable.ic_play_white);
+        if (!isFullscreen) return;
+        if (!playing) {
+            // While paused, keep the icon visible so the user can find
+            // it without tapping the screen first.
+            showFullscreenPlayPause(false);
+        } else {
+            scheduleHideFullscreenPlayPause();
+        }
+    }
+
+    /** Reveal the fullscreen play/pause button; auto-hide unless paused. */
+    private void showFullscreenPlayPause(boolean autoHide) {
+        if (btnFullscreenPlayPause == null) return;
+        btnFullscreenPlayPause.setVisibility(View.VISIBLE);
+        btnFullscreenPlayPause.bringToFront();
+        if (autoHide) scheduleHideFullscreenPlayPause();
+        else mainHandler.removeCallbacks(hideFullscreenPlayPause);
+    }
+
+    private void scheduleHideFullscreenPlayPause() {
+        if (btnFullscreenPlayPause == null) return;
+        mainHandler.removeCallbacks(hideFullscreenPlayPause);
+        // Only auto-hide while playing \u2014 if paused, the icon stays put
+        // so the user knows they can resume.
+        if (videoPlaying) {
+            mainHandler.postDelayed(hideFullscreenPlayPause, 1800L);
+        }
+    }
+
+    private final Runnable hideFullscreenPlayPause = () -> {
+        if (btnFullscreenPlayPause != null && videoPlaying) {
+            btnFullscreenPlayPause.setVisibility(View.GONE);
+        }
+    };
+
+    /**
+     * Tap-to-toggle handler for fullscreen mode. Each tap on the video
+     * area flips play/pause on the underlying YT &lt;video&gt; element
+     * and reveals the central play/pause button briefly.
+     */
+    private void onFullscreenTap() {
+        if (!isFullscreen || webView == null) return;
+        WebViewPlayerBridge.togglePlay(webView);
+        // Optimistic flip \u2014 the bridge poll will correct us within ~250ms.
+        videoPlaying = !videoPlaying;
+        if (btnFullscreenPlayPause != null) {
+            btnFullscreenPlayPause.setImageResource(videoPlaying
+                    ? R.drawable.ic_pause_white
+                    : R.drawable.ic_play_white);
+        }
+        showFullscreenPlayPause(videoPlaying);
+    }
+
     private void onActiveLineChanged(int newIndex) {
         activeLineIndex = newIndex;
         if (adapter == null || layoutManager == null) return;
         adapter.setActiveIndex(newIndex);
+        // Sprint 5: keep the fullscreen overlay text in sync. Cheap no-op
+        // when overlay is hidden, so we don't gate it on isFullscreen.
+        updateOverlayText();
         if (newIndex < 0) return;
         if (!getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) return;
 
@@ -554,6 +815,9 @@ public class PlayerActivity extends AppCompatActivity
         btnLangMode.setText(labelRes);
         btnLangMode.setSelected(langMode != LangMode.EN);
         if (adapter != null) adapter.setLangMode(adapterMode);
+        // Overlay row visibilities track LangMode too — EN-only hides the
+        // VI line, VI-only hides the EN line, BOTH stacks them.
+        updateOverlayText();
     }
 
     @Nullable
@@ -566,39 +830,82 @@ public class PlayerActivity extends AppCompatActivity
     /** Whichever projection of the subtitle track is currently being shown. */
     @NonNull
     private List<SubtitleLine> activeLines() {
-        return combineLinesEnabled ? sentenceLines : latestLines;
+        switch (combineMode) {
+            case MODE1: return sentenceLines;
+            case MODE2: return sentenceLinesStrict;
+            default:    return latestLines;
+        }
     }
 
     /**
-     * Sprint 4: toggle between cue-level and sentence-level views. The active
-     * highlight is translated across modes so the user keeps their place,
-     * and the loop scope is cancelled because it refers to a specific line
-     * in the previous projection.
+     * Tap on the "Ghép câu" button: cycles MODE1 ↔ NONE. If MODE2 was on,
+     * we go straight to MODE1.
      */
-    private void toggleCombineLines() {
-        int prevActive = activeLineIndex;
-        boolean wasCombineEnabled = combineLinesEnabled;
+    private void toggleCombineLinesMode1() {
+        applyCombineMode(combineMode == CombineMode.MODE1
+                ? CombineMode.NONE
+                : CombineMode.MODE1);
+    }
 
-        combineLinesEnabled = !combineLinesEnabled;
-        if (btnCombineLines != null) btnCombineLines.setSelected(combineLinesEnabled);
+    /**
+     * Tap on the "Ghép câu 2" button: cycles MODE2 ↔ NONE, evicting MODE1.
+     */
+    private void toggleCombineLinesMode2() {
+        applyCombineMode(combineMode == CombineMode.MODE2
+                ? CombineMode.NONE
+                : CombineMode.MODE2);
+    }
+
+    /**
+     * Sprint 4: switch between cue-level and the two sentence-level views.
+     * The active highlight is translated across modes so the user keeps
+     * their place, and the loop scope is cancelled because it refers to a
+     * specific line in the previous projection.
+     */
+    private void applyCombineMode(CombineMode next) {
+        if (next == combineMode) return;
+        int prevActive = activeLineIndex;
+        CombineMode prev = combineMode;
+        combineMode = next;
+
+        if (btnCombineLines != null)
+            btnCombineLines.setSelected(combineMode == CombineMode.MODE1);
+        if (btnCombineLinesStrict != null)
+            btnCombineLinesStrict.setSelected(combineMode == CombineMode.MODE2);
 
         loopLineEnabled = false;
         loopStartMs = -1L;
         loopEndMs = -1L;
         if (btnLoopLine != null) btnLoopLine.setSelected(false);
 
-        int newActive;
-        if (!wasCombineEnabled) {
-            newActive = SentenceJoiner.sentenceIndexForCue(latestLines, prevActive);
+        // Translate the active index through whichever projection mapping
+        // applies. We always go through the raw cue index as the canonical
+        // anchor: if we're leaving a sentence view, map the sentence
+        // back to its first cue; if we're entering a sentence view, map
+        // the current cue forward to its sentence index.
+        int rawCueIndex;
+        if (prev == CombineMode.MODE1) {
+            rawCueIndex = SentenceJoiner.firstCueIndexForSentence(latestLines, prevActive);
+        } else if (prev == CombineMode.MODE2) {
+            rawCueIndex = SentenceJoiner.firstCueIndexForSentenceStrict(latestLines, prevActive);
         } else {
-            newActive = SentenceJoiner.firstCueIndexForSentence(latestLines, prevActive);
+            rawCueIndex = prevActive;
         }
 
-        List<SubtitleLine> next = activeLines();
-        syncController.attach(next);
+        int newActive;
+        if (combineMode == CombineMode.MODE1) {
+            newActive = SentenceJoiner.sentenceIndexForCue(latestLines, rawCueIndex);
+        } else if (combineMode == CombineMode.MODE2) {
+            newActive = SentenceJoiner.sentenceIndexForCueStrict(latestLines, rawCueIndex);
+        } else {
+            newActive = rawCueIndex;
+        }
+
+        List<SubtitleLine> nextList = activeLines();
+        syncController.attach(nextList);
         activeLineIndex = newActive;
         if (adapter != null) {
-            adapter.submit(next);
+            adapter.submit(nextList);
             adapter.setActiveIndex(newActive);
         }
         if (newActive >= 0 && layoutManager != null
@@ -606,6 +913,298 @@ public class PlayerActivity extends AppCompatActivity
             TopSmoothScroller scroller = new TopSmoothScroller(this);
             scroller.setTargetPosition(newActive);
             layoutManager.startSmoothScroll(scroller);
+        }
+    }
+
+    // --- Sprint 5 fullscreen overlay ----------------------------------------
+
+    /**
+     * Called from {@link WebChromeClient#onShowCustomView} when YouTube's
+     * mobile page enters HTML5 fullscreen on the &lt;video&gt; element. We
+     * mount the supplied native view over the player chrome, force
+     * landscape, and reveal the bilingual overlay so the user can keep
+     * reading subtitles while the YouTube UI takes over.
+     */
+    /**
+     * Native app-fullscreen flow (Sprint 5): hides the action bar / FAB /
+     * subtitle panel / system bars and shows the bilingual overlay.
+     * Triggered by device rotation — we don't depend on YouTube's HTML5
+     * fullscreen API succeeding (the WebView often blocks
+     * {@code requestFullscreen()} for lack of a user gesture). We still
+     * fire the JS request so that, when it does succeed, YouTube's own
+     * fullscreen video chrome takes over inside the WebView.
+     */
+    private void enterAppFullscreen() {
+        if (isFullscreen) return;
+        isFullscreen = true;
+
+        if (playerActionBar != null) playerActionBar.setVisibility(View.GONE);
+        if (webProgress != null) webProgress.setVisibility(View.GONE);
+        if (fabSubtitles != null) fabSubtitles.setVisibility(View.GONE);
+        if (subtitlePanel != null) {
+            savedSubtitlePanelVisibility = subtitlePanel.getVisibility();
+            subtitlePanel.setVisibility(View.GONE);
+        }
+
+        Window window = getWindow();
+        WindowCompat.setDecorFitsSystemWindows(window, false);
+        WindowInsetsControllerCompat ctrl =
+                WindowCompat.getInsetsController(window, window.getDecorView());
+        ctrl.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        ctrl.hide(WindowInsetsCompat.Type.systemBars());
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        subtitleOverlay.setVisibility(View.VISIBLE);
+        subtitleOverlay.bringToFront();
+        updateOverlayText();
+
+        if (fullscreenTapArea != null) {
+            fullscreenTapArea.setVisibility(View.VISIBLE);
+            fullscreenTapArea.bringToFront();
+            // Force a high elevation so the WebView's hardware video
+            // surface (which is at z=0) doesn't punch through and hide
+            // these overlays. Without this, ImageView children drawn
+            // "above" the WebView in XML are still occluded by the
+            // SurfaceView-backed video.
+            fullscreenTapArea.setElevation(12f);
+        }
+        if (btnFullscreenPlayPause != null) {
+            btnFullscreenPlayPause.setElevation(16f);
+        }
+        if (btnExitFullscreen != null) {
+            btnExitFullscreen.setVisibility(View.VISIBLE);
+            btnExitFullscreen.setElevation(16f);
+        }
+        // Reveal the play/pause button briefly on entry so the user
+        // discovers it; auto-fades while playing, persists when paused.
+        showFullscreenPlayPause(videoPlaying);
+        // Re-stack the subtitle overlay above the tap area so it stays
+        // on top of any other transient UI.
+        subtitleOverlay.setElevation(14f);
+        subtitleOverlay.bringToFront();
+
+        // Hide the rest of the YT mobile page (header, description,
+        // comments, related) so it doesn't bleed in behind the overlay
+        // when the user has scrolled or YT's SPA has rerendered.
+        if (webView != null) webView.scrollTo(0, 0);
+        setPlayerMask(true);
+
+        // Best-effort: ask YouTube to enter HTML5 fullscreen on its <video>
+        // element. If it succeeds, mountCustomView() takes over the
+        // fullscreen_container; if not, we still have the app-level
+        // fullscreen with overlay above.
+        requestVideoFullscreen();
+    }
+
+    private void exitAppFullscreen() {
+        if (!isFullscreen) return;
+        isFullscreen = false;
+
+        // Tear down YT customView first so it doesn't briefly flash on
+        // top of the restored chrome.
+        if (customView != null) unmountCustomView();
+        else exitVideoFullscreen();
+
+        // Restore the YT mobile page (description, comments, ...).
+        setPlayerMask(false);
+
+        if (playerActionBar != null) playerActionBar.setVisibility(View.VISIBLE);
+        if (fabSubtitles != null) fabSubtitles.setVisibility(View.VISIBLE);
+        if (subtitlePanel != null) {
+            subtitlePanel.setVisibility(savedSubtitlePanelVisibility);
+        }
+
+        subtitleOverlay.setVisibility(View.GONE);
+        if (fullscreenTapArea != null) fullscreenTapArea.setVisibility(View.GONE);
+        if (btnFullscreenPlayPause != null) btnFullscreenPlayPause.setVisibility(View.GONE);
+        if (btnExitFullscreen != null) btnExitFullscreen.setVisibility(View.GONE);
+        mainHandler.removeCallbacks(hideFullscreenPlayPause);
+
+        Window window = getWindow();
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        WindowCompat.setDecorFitsSystemWindows(window, true);
+        WindowInsetsControllerCompat ctrl =
+                WindowCompat.getInsetsController(window, window.getDecorView());
+        ctrl.show(WindowInsetsCompat.Type.systemBars());
+    }
+
+    /**
+     * Mounts the YouTube-supplied native view on top of the app chrome
+     * when YT successfully enters HTML5 fullscreen on the &lt;video&gt;
+     * element. Mounting only — the system-bar hiding and overlay reveal
+     * happen in {@link #enterAppFullscreen} which is the source of truth
+     * for fullscreen state.
+     */
+    private void mountCustomView(@NonNull View view, @NonNull WebChromeClient.CustomViewCallback callback) {
+        if (customView != null) {
+            callback.onCustomViewHidden();
+            return;
+        }
+        customView = view;
+        customViewCallback = callback;
+
+        fullscreenContainer.removeAllViews();
+        fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        fullscreenContainer.setVisibility(View.VISIBLE);
+        fullscreenContainer.bringToFront();
+        // Keep the overlay above the customView so the user can still
+        // read EN/VI subtitles over the YT video.
+        if (isFullscreen) {
+            subtitleOverlay.bringToFront();
+        } else {
+            // YT entered fullscreen on its own (user tapped the button).
+            // Mirror app fullscreen so chrome is hidden and overlay is up.
+            enterAppFullscreen();
+            subtitleOverlay.bringToFront();
+        }
+    }
+
+    private void unmountCustomView() {
+        if (customView == null) return;
+        fullscreenContainer.setVisibility(View.GONE);
+        fullscreenContainer.removeAllViews();
+
+        if (customViewCallback != null) {
+            try {
+                customViewCallback.onCustomViewHidden();
+            } catch (RuntimeException e) {
+                Log.w(TAG, "customView onHidden threw", e);
+            }
+        }
+        customView = null;
+        customViewCallback = null;
+    }
+
+    /**
+     * Sprint 5 (rotate-driven): when the device rotates we ask the
+     * YouTube page to enter / exit HTML5 fullscreen on the &lt;video&gt;
+     * element. Going through requestFullscreen() routes back into our
+     * {@link WebChromeClient#onShowCustomView}, which is the same path
+     * the manual fullscreen button uses — so we get the customView,
+     * the system bar hiding, and the overlay for free.
+     *
+     * Two fallbacks guard against requestFullscreen() being blocked by
+     * the user-gesture policy on certain WebView builds: we also try
+     * the iOS-style {@code webkitEnterFullscreen()} and finally a
+     * straight click on the player's fullscreen button.
+     */
+    private void requestVideoFullscreen() {
+        if (webView == null) return;
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "  var v = document.querySelector('video.video-stream')"
+                        + "        || document.querySelector('video');"
+                        + "  if (!v) return 'no-video';"
+                        + "  if (v.requestFullscreen) {"
+                        + "    try { v.requestFullscreen(); return 'request'; } catch(e) {}"
+                        + "  }"
+                        + "  if (v.webkitEnterFullscreen) {"
+                        + "    try { v.webkitEnterFullscreen(); return 'webkit'; } catch(e) {}"
+                        + "  }"
+                        + "  var btn = document.querySelector('button.fullscreen-icon')"
+                        + "        || document.querySelector('button[aria-label*=\"ull screen\"]')"
+                        + "        || document.querySelector('.ytp-fullscreen-button');"
+                        + "  if (btn) { btn.click(); return 'btn'; }"
+                        + "  return 'none';"
+                        + "})();",
+                null);
+    }
+
+    private void exitVideoFullscreen() {
+        if (webView == null) return;
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "  if (document.exitFullscreen) {"
+                        + "    try { document.exitFullscreen(); return 'exit'; } catch(e) {}"
+                        + "  }"
+                        + "  if (document.webkitExitFullscreen) {"
+                        + "    try { document.webkitExitFullscreen(); return 'webkit'; } catch(e) {}"
+                        + "  }"
+                        + "  var btn = document.querySelector('button.fullscreen-icon')"
+                        + "        || document.querySelector('button[aria-label*=\"xit\"]')"
+                        + "        || document.querySelector('.ytp-fullscreen-button');"
+                        + "  if (btn) { btn.click(); return 'btn'; }"
+                        + "  return 'none';"
+                        + "})();",
+                null);
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Auto-rotate UX (Sprint 5): rotating the device to landscape
+        // hides the app chrome + system bars and reveals the bilingual
+        // overlay; rotating back to portrait restores everything.
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            enterAppFullscreen();
+            // While in landscape, keep whatever orientation lock the
+            // user requested (forced or sensor) — releasing here would
+            // immediately snap back to portrait when auto-rotate is off.
+        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            exitAppFullscreen();
+            // Now that we're back in portrait, release any lock we set
+            // via the on-screen fullscreen-toggle button so the user's
+            // auto-rotate preference takes over for future rotations.
+            mainHandler.postDelayed(this::releaseOrientationLock, 600L);
+        }
+    }
+
+    /**
+     * Force the device into landscape (or portrait) regardless of the
+     * user's auto-rotate preference. The OS will fire
+     * {@link #onConfigurationChanged} once it finishes rotating, which
+     * drives enter/exitAppFullscreen via the same path as a free
+     * device rotation.
+     */
+    private void requestFullscreenOrientation(boolean enter) {
+        setRequestedOrientation(enter
+                ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+    }
+
+    /** Hand orientation control back to the device sensor / user setting. */
+    private void releaseOrientationLock() {
+        if (getRequestedOrientation() != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        }
+    }
+
+    /**
+     * Refresh the overlay's EN/VI TextViews from the current active line.
+     * Honours {@link #langMode} (hides the row that the user has switched
+     * off) and falls back to EN-only if Vi translation hasn't landed yet,
+     * mirroring the inline panel's behaviour.
+     */
+    private void updateOverlayText() {
+        if (subtitleOverlay == null) return;
+        SubtitleLine line = currentActiveLine();
+        if (line == null) {
+            tvOverlayEn.setText("");
+            tvOverlayVi.setText("");
+            tvOverlayEn.setVisibility(View.GONE);
+            tvOverlayVi.setVisibility(View.GONE);
+            return;
+        }
+        boolean hasVi = line.textVi != null && !line.textVi.isEmpty();
+        boolean showEn = langMode == LangMode.EN
+                || langMode == LangMode.BOTH
+                || !hasVi;
+        boolean showVi = langMode != LangMode.EN && hasVi;
+
+        if (showEn) {
+            tvOverlayEn.setText(line.textEn == null ? "" : line.textEn);
+            tvOverlayEn.setVisibility(View.VISIBLE);
+        } else {
+            tvOverlayEn.setVisibility(View.GONE);
+        }
+        if (showVi) {
+            tvOverlayVi.setText(line.textVi);
+            tvOverlayVi.setVisibility(View.VISIBLE);
+        } else {
+            tvOverlayVi.setVisibility(View.GONE);
         }
     }
 
@@ -674,6 +1273,7 @@ public class PlayerActivity extends AppCompatActivity
     private void applyLines(@NonNull List<SubtitleLine> lines) {
         latestLines = lines;
         sentenceLines = SentenceJoiner.join(lines);
+        sentenceLinesStrict = SentenceJoiner.joinStrict(lines);
         state = SubtitleState.READY;
         syncController.attach(activeLines());
         applyStateToSheet();
@@ -832,17 +1432,19 @@ public class PlayerActivity extends AppCompatActivity
         for (int i = 0; i < n; i++) {
             lines.get(i).textVi = translations.get(i);
         }
-        // Sentence projection holds copies of cue text — rebuild it so the
+        // Sentence projections hold copies of cue text — rebuild both so the
         // joined Vi shows up immediately when the user is in combine mode.
         sentenceLines = SentenceJoiner.join(lines);
+        sentenceLinesStrict = SentenceJoiner.joinStrict(lines);
         if (adapter == null) return;
-        if (combineLinesEnabled) {
+        if (combineMode != CombineMode.NONE) {
             int preserved = activeLineIndex;
-            adapter.submit(sentenceLines);
+            List<SubtitleLine> projection = activeLines();
+            adapter.submit(projection);
             adapter.setActiveIndex(preserved);
             // Re-attach so the sync controller's binary search references the
             // new SubtitleLine instances (timings unchanged, identity changed).
-            syncController.attach(sentenceLines);
+            syncController.attach(projection);
         } else {
             adapter.refreshTranslations();
         }
@@ -864,6 +1466,10 @@ public class PlayerActivity extends AppCompatActivity
 
     @Override
     protected void onDestroy() {
+        // Make sure system bars / orientation come back before the activity
+        // tears down — otherwise an in-flight fullscreen could leak the
+        // landscape-locked rotation onto the next screen.
+        if (isFullscreen) exitAppFullscreen();
         syncController.detach();
         io.shutdownNow();
         if (webView != null) {
