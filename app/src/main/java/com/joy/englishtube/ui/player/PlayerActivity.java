@@ -47,6 +47,8 @@ import com.joy.englishtube.EnglishTubeApp;
 import com.joy.englishtube.R;
 import com.joy.englishtube.data.BookmarkDao;
 import com.joy.englishtube.data.BookmarkEntity;
+import com.joy.englishtube.data.HistoryDao;
+import com.joy.englishtube.data.HistoryEntity;
 import com.joy.englishtube.data.SubtitleCacheDao;
 import com.joy.englishtube.data.SubtitleCacheEntity;
 import com.joy.englishtube.model.SubtitleLine;
@@ -285,6 +287,7 @@ public class PlayerActivity extends AppCompatActivity
         syncController.setListener(this::onActiveLineChanged);
         applyStateToSheet();
         loadSubtitlesAsync(videoId);
+        recordHistory(videoId);
     }
 
     /**
@@ -391,6 +394,20 @@ public class PlayerActivity extends AppCompatActivity
             public void onProgressChanged(WebView view, int newProgress) {
                 webProgress.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
                 webProgress.setProgress(newProgress);
+            }
+
+            @Override
+            public void onReceivedTitle(WebView view, String title) {
+                // YT page titles look like "<video> - YouTube"; strip
+                // the trailing " - YouTube" so the history list stays
+                // tidy. Falls through gracefully if the suffix is gone.
+                if (videoId == null || title == null) return;
+                String stripped = title;
+                int idx = stripped.lastIndexOf(" - YouTube");
+                if (idx > 0) stripped = stripped.substring(0, idx);
+                stripped = stripped.trim();
+                if (stripped.isEmpty()) return;
+                updateHistoryTitle(videoId, stripped);
             }
 
             @Override
@@ -557,6 +574,7 @@ public class PlayerActivity extends AppCompatActivity
         resetAuxiliaryStateForNewVideo();
         applyStateToSheet();
         loadSubtitlesAsync(newId);
+        recordHistory(newId);
     }
 
     @Nullable
@@ -1389,6 +1407,48 @@ public class PlayerActivity extends AppCompatActivity
     }
 
     // --- Subtitle fetch ------------------------------------------------------
+
+    /**
+     * Sprint 6: insert/update the {@code history} row for this video.
+     * Title arrives later via {@link WebChromeClient#onReceivedTitle}
+     * (see {@link #updateHistoryTitle}); the initial upsert just
+     * captures the videoId, default thumbnail, and watched-at
+     * timestamp so the row already exists by the time the title
+     * lands.
+     */
+    private void recordHistory(@Nullable String id) {
+        if (id == null || id.isEmpty()) return;
+        final String captured = id;
+        final long now = System.currentTimeMillis();
+        EnglishTubeApp.get().getDbExecutor().execute(() -> {
+            HistoryDao dao = EnglishTubeApp.get().getDatabase().historyDao();
+            HistoryEntity existing = dao.findById(captured);
+            HistoryEntity row = existing != null ? existing : new HistoryEntity();
+            row.videoId = captured;
+            row.lastWatchedAt = now;
+            if (row.thumbnailUrl == null || row.thumbnailUrl.isEmpty()) {
+                row.thumbnailUrl = "https://i.ytimg.com/vi/" + captured + "/mqdefault.jpg";
+            }
+            // lastPositionMs / durationMs are deliberately left at 0 —
+            // resume-from-position is out of scope for Sprint 6.
+            dao.upsert(row);
+        });
+    }
+
+    /**
+     * Updates just the title field of the history row, called once
+     * the WebView reports the page title. We don't overwrite an
+     * existing title with an empty one.
+     */
+    private void updateHistoryTitle(@NonNull String id, @NonNull String title) {
+        EnglishTubeApp.get().getDbExecutor().execute(() -> {
+            HistoryDao dao = EnglishTubeApp.get().getDatabase().historyDao();
+            HistoryEntity existing = dao.findById(id);
+            if (existing == null) return;
+            existing.title = title;
+            dao.upsert(existing);
+        });
+    }
 
     private void loadSubtitlesAsync(@NonNull String requestedId) {
         io.execute(() -> {

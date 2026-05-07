@@ -6,6 +6,16 @@
     <string name="title_history">Lịch sử</string>
     <string name="title_bookmark">Bookmark</string>
     <string name="title_settings">Cài đặt</string>
+    <string name="history_empty">Chưa có video nào đã xem.</string>
+    <string name="history_clear_all">Xóa tất cả</string>
+    <string name="history_clear_confirm">Xóa toàn bộ lịch sử?</string>
+    <string name="history_delete_confirm">Xóa video này khỏi lịch sử?</string>
+    <string name="history_just_watched">Vừa xem</string>
+    <string name="history_minutes_ago">%1$d phút trước</string>
+    <string name="history_hours_ago">%1$d giờ trước</string>
+    <string name="history_days_ago">%1$d ngày trước</string>
+    <string name="action_delete">Xóa</string>
+    <string name="action_cancel">Hủy</string>
 
     <!-- Navigation -->
     <string name="nav_back">Quay lại</string>
