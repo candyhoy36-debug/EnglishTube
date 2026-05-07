@@ -79,6 +79,9 @@ dependencies {
     // ML Kit on-device translation (offline engine)
     implementation 'com.google.mlkit:translate:17.0.2'
 
+    // Glide — image loading + caching for History / Bookmark thumbnails.
+    implementation 'com.github.bumptech.glide:glide:4.16.0'
+
     // Tests
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'

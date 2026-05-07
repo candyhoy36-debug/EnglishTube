@@ -7,6 +7,8 @@ import com.joy.englishtube.service.impl.NewPipeDownloader;
 
 import org.schabi.newpipe.extractor.NewPipe;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -20,6 +22,7 @@ public class EnglishTubeApp extends Application {
     private static EnglishTubeApp instance;
     private AppDatabase database;
     private OkHttpClient httpClient;
+    private ExecutorService dbExecutor;
 
     public static EnglishTubeApp get() {
         return instance;
@@ -41,6 +44,22 @@ public class EnglishTubeApp extends Application {
             database = AppDatabase.create(this);
         }
         return database;
+    }
+
+    /**
+     * Single-threaded executor for Room DB writes. Reads can also be
+     * dispatched here so we serialise everything and don't block the
+     * UI thread. Created lazily on first use.
+     */
+    public synchronized ExecutorService getDbExecutor() {
+        if (dbExecutor == null) {
+            dbExecutor = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "EnglishTubeDb");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        return dbExecutor;
     }
 
     public synchronized OkHttpClient getHttpClient() {

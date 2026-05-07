@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sticky-note look for user-typed notes (warm yellow background). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/banner_warning_bg" />
+    <corners android:radius="6dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#FFE9D079" />
+</shape>

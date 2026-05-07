@@ -6,6 +6,45 @@
     <string name="title_history">Lịch sử</string>
     <string name="title_bookmark">Bookmark</string>
     <string name="title_settings">Cài đặt</string>
+    <string name="history_empty">Chưa có video nào đã xem.</string>
+    <string name="history_clear_all">Xóa tất cả</string>
+    <string name="history_clear_confirm">Xóa toàn bộ lịch sử?</string>
+    <string name="history_delete_confirm">Xóa video này khỏi lịch sử?</string>
+    <string name="history_just_watched">Vừa xem</string>
+    <string name="history_minutes_ago">%1$d phút trước</string>
+    <string name="history_hours_ago">%1$d giờ trước</string>
+    <string name="history_days_ago">%1$d ngày trước</string>
+    <string name="action_delete">Xóa</string>
+    <string name="action_cancel">Hủy</string>
+    <string name="action_save">Lưu</string>
+    <string name="bookmark_empty">Chưa có bookmark nào.</string>
+    <string name="bookmark_clear_all">Xóa tất cả</string>
+    <string name="bookmark_clear_confirm">Xóa toàn bộ bookmark?</string>
+    <string name="bookmark_delete_confirm">Xóa bookmark này?</string>
+    <string name="bookmark_search_hint">Tìm trong bookmark…</string>
+    <string name="bookmark_edit_note">Ghi chú</string>
+    <string name="bookmark_note_hint">Nhập ghi chú (tùy chọn)…</string>
+
+    <!-- Settings -->
+    <string name="pref_cat_playback">Phát</string>
+    <string name="pref_cat_translation">Dịch thuật</string>
+    <string name="pref_cat_overlay">Phụ đề toàn màn hình</string>
+    <string name="pref_cat_storage">Bộ nhớ</string>
+    <string name="pref_cat_about">Về ứng dụng</string>
+    <string name="pref_default_lang_mode">Ngôn ngữ phụ đề mặc định</string>
+    <string name="pref_default_combine_mode">Chế độ ghép câu mặc định</string>
+    <string name="pref_default_playback_speed">Tốc độ phát mặc định</string>
+    <string name="pref_default_loop_video">Lặp video mặc định</string>
+    <string name="pref_default_loop_video_summary">Phát lại video khi kết thúc thay vì sang video kế</string>
+    <string name="pref_translation_service">Dịch vụ dịch</string>
+    <string name="pref_overlay_font_size">Cỡ chữ phụ đề (sp)</string>
+    <string name="pref_overlay_opacity">Độ mờ nền (%%)</string>
+    <string name="pref_clear_history">Xóa lịch sử</string>
+    <string name="pref_clear_bookmarks">Xóa toàn bộ bookmark</string>
+    <string name="pref_clear_subtitle_cache">Xóa cache phụ đề</string>
+    <string name="pref_about_version">Phiên bản</string>
+    <string name="pref_cleared">Đã xóa.</string>
+    <string name="pref_clear_subtitle_cache_confirm">Xóa toàn bộ phụ đề đã cache?</string>
 
     <!-- Navigation -->
     <string name="nav_back">Quay lại</string>
@@ -60,7 +99,11 @@
     <string name="edit_subtitle_not_yet">Chỉnh sửa phụ đề sẽ có ở sprint sau.</string>
     <string name="action_playback_speed">Tốc độ</string>
     <string name="action_text_size">Cỡ chữ</string>
-    <string name="action_download_srt">Tải SRT</string>
+    <string name="action_import_srt">Nhập SRT</string>
+    <string name="import_srt_success">Đã nhập %1$d dòng phụ đề.</string>
+    <string name="import_srt_empty">Tệp SRT không có nội dung hợp lệ.</string>
+    <string name="import_srt_failed">Không đọc được tệp SRT.</string>
+    <string name="import_srt_fallback_hint">Hoặc nhập tệp SRT từ thiết bị</string>
     <string name="playback_speed_not_yet">Đổi tốc độ phát sẽ có ở sprint sau.</string>
     <string name="text_size_not_yet">Tuỳ chỉnh cỡ chữ sẽ có ở sprint sau.</string>
     <string name="download_srt_not_yet">Tải xuống SRT sẽ có ở sprint sau.</string>

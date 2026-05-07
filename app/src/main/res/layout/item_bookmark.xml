@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Single bookmark inside a "video group" card. Background drawable
+    is swapped at bind time (middle vs bottom) so the last bookmark
+    in a group has rounded bottom corners and the rest are square.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:layout_marginHorizontal="12dp"
+    android:background="@drawable/bg_bookmark_card_middle"
+    android:foreground="?attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:paddingHorizontal="12dp"
+    android:paddingVertical="10dp">
+
+    <!-- Top divider mimics a row separator without leaking past the
+         card's rounded corners (a real <View> divider would). -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="10dp">
+
+        <TextView
+            android:id="@+id/timestamp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_bookmark_timestamp"
+            android:textColor="@color/brand_primary_dark"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:fontFeatureSettings="tnum"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="2dp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/text_en"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textColor="@color/text_primary"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:lineSpacingExtra="2dp" />
+
+    <TextView
+        android:id="@+id/text_vi"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp"
+        android:textStyle="italic"
+        android:lineSpacingExtra="2dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/note"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_bookmark_note"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
+        android:textColor="@color/banner_warning_text"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+</LinearLayout>

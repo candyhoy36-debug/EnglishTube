@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Top of a "video group" card. Hosts the YT thumbnail, video
+    title (max 2 lines) and a brand-tinted count badge showing how
+    many bookmarks live in the group below. Padding-bottom is small
+    because the next sibling is a flush bookmark item from the same
+    card; the bottom corners are flat so the items can sit on top.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/bg_bookmark_card_top"
+    android:layout_marginHorizontal="12dp"
+    android:layout_marginTop="14dp"
+    android:paddingHorizontal="12dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="10dp">
+
+    <ImageView
+        android:id="@+id/thumbnail"
+        android:layout_width="64dp"
+        android:layout_height="36dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null"
+        android:background="@color/surface_variant" />
+
+    <TextView
+        android:id="@+id/group_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="10dp"
+        android:textColor="@color/text_primary"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:lineSpacingExtra="2dp"
+        android:maxLines="2"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/group_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:minWidth="22dp"
+        android:gravity="center"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp"
+        android:background="@drawable/bg_bookmark_count_badge"
+        android:textColor="@color/white"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

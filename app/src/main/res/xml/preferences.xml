@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="@string/pref_cat_playback">
+
+        <ListPreference
+            app:key="pref_default_lang_mode"
+            app:title="@string/pref_default_lang_mode"
+            app:entries="@array/pref_lang_mode_entries"
+            app:entryValues="@array/pref_lang_mode_values"
+            app:defaultValue="EN"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="pref_default_combine_mode"
+            app:title="@string/pref_default_combine_mode"
+            app:entries="@array/pref_combine_mode_entries"
+            app:entryValues="@array/pref_combine_mode_values"
+            app:defaultValue="NONE"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="pref_default_playback_speed"
+            app:title="@string/pref_default_playback_speed"
+            app:entries="@array/pref_playback_speed_entries"
+            app:entryValues="@array/pref_playback_speed_values"
+            app:defaultValue="1.0"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="pref_default_loop_video"
+            app:title="@string/pref_default_loop_video"
+            app:summary="@string/pref_default_loop_video_summary"
+            app:defaultValue="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_cat_translation">
+
+        <ListPreference
+            app:key="pref_translation_service"
+            app:title="@string/pref_translation_service"
+            app:entries="@array/pref_translation_service_entries"
+            app:entryValues="@array/pref_translation_service_values"
+            app:defaultValue="GOOGLE"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_cat_overlay">
+
+        <SeekBarPreference
+            app:key="pref_overlay_font_size"
+            app:title="@string/pref_overlay_font_size"
+            app:defaultValue="20"
+            android:max="36"
+            app:min="12"
+            app:showSeekBarValue="true" />
+
+        <SeekBarPreference
+            app:key="pref_overlay_opacity"
+            app:title="@string/pref_overlay_opacity"
+            app:defaultValue="60"
+            android:max="100"
+            app:min="0"
+            app:showSeekBarValue="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_cat_storage">
+
+        <Preference
+            app:key="pref_clear_history"
+            app:title="@string/pref_clear_history" />
+
+        <Preference
+            app:key="pref_clear_bookmarks"
+            app:title="@string/pref_clear_bookmarks" />
+
+        <Preference
+            app:key="pref_clear_subtitle_cache"
+            app:title="@string/pref_clear_subtitle_cache" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_cat_about">
+
+        <Preference
+            app:key="pref_about_version"
+            app:title="@string/pref_about_version"
+            app:selectable="false" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

@@ -31,6 +31,8 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.WindowCompat;
@@ -47,6 +49,8 @@ import com.joy.englishtube.EnglishTubeApp;
 import com.joy.englishtube.R;
 import com.joy.englishtube.data.BookmarkDao;
 import com.joy.englishtube.data.BookmarkEntity;
+import com.joy.englishtube.data.HistoryDao;
+import com.joy.englishtube.data.HistoryEntity;
 import com.joy.englishtube.data.SubtitleCacheDao;
 import com.joy.englishtube.data.SubtitleCacheEntity;
 import com.joy.englishtube.model.SubtitleLine;
@@ -88,6 +92,13 @@ public class PlayerActivity extends AppCompatActivity
         implements WebViewPlayerBridge.Callback {
 
     public static final String EXTRA_VIDEO_ID = "extra_video_id";
+    /**
+     * Optional seek-to position in milliseconds. Caller (e.g. Bookmark
+     * deep-link) sets this when they want playback to resume at a
+     * specific cue rather than from the start. Consumed once on the
+     * first {@link #onReady()} that follows the matching videoId.
+     */
+    public static final String EXTRA_SEEK_MS = "extra_seek_ms";
 
     private static final String TAG = "PlayerActivity";
     private static final String SUBTITLE_LANG_EN = "en";
@@ -101,8 +112,27 @@ public class PlayerActivity extends AppCompatActivity
         return i;
     }
 
+    /**
+     * Variant that asks the player to seek to {@code seekMs} once the
+     * video element is ready. Use this for "open this bookmark" /
+     * "open at this timestamp" deep-links.
+     */
+    @NonNull
+    public static Intent intent(@NonNull Context ctx, @NonNull String videoId,
+                                long seekMs) {
+        Intent i = intent(ctx, videoId);
+        i.putExtra(EXTRA_SEEK_MS, seekMs);
+        return i;
+    }
+
     @Nullable
     private String videoId;
+    /**
+     * Pending seek-to position from {@link #EXTRA_SEEK_MS}. Cleared
+     * the first time we successfully apply it. Negative when no seek
+     * was requested.
+     */
+    private long pendingSeekMs = -1L;
 
     private WebView webView;
     private ProgressBar webProgress;
@@ -114,6 +144,15 @@ public class PlayerActivity extends AppCompatActivity
     private TextView btnCombineLinesStrict;
     private TextView btnLoopLine;
     private TextView btnLoopVideo;
+
+    /**
+     * SAF launcher for picking an .srt file off-device. Registered in
+     * onCreate; result is consumed by {@link #importSrtFromUri(Uri)}.
+     */
+    private final ActivityResultLauncher<String[]> srtPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+                if (uri != null) importSrtFromUri(uri);
+            });
     private TextView btnBookmarkLine;
     private TextView btnLangMode;
     private TextView btnEnterFullscreen;
@@ -198,17 +237,24 @@ public class PlayerActivity extends AppCompatActivity
     private final PlayerSyncController syncController = new PlayerSyncControllerImpl();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final OkHttpClient http = new OkHttpClient();
-    // Auto: Google online (fast, batched) → ML Kit on-device fallback. The
-    // service is stateless so a single instance is reused across videos.
-    private final TranslationService translationService =
-            new AutoTranslateService(
-                    new GoogleTranslateService(http),
-                    new MlKitTranslateService());
+    // Translation engine is chosen based on the
+    // {@code pref_translation_service} preference and built lazily in
+    // {@link #onCreate(Bundle)}. Instance is reused across videos
+    // since none of the impls hold per-video state.
+    private TranslationService translationService;
     private long lastTickMs = 0L;
 
     private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
     private SubtitleState state = SubtitleState.LOADING;
     private List<SubtitleLine> latestLines = Collections.emptyList();
+    /**
+     * Sprint 6: title reported by {@link WebChromeClient#onReceivedTitle}.
+     * Captured so {@link #bookmarkActiveLine()} can store the title with
+     * the bookmark row (BookmarkEntity.videoTitle), letting BookmarkActivity
+     * display human-readable group headers without an extra DB join.
+     */
+    @Nullable
+    private String currentVideoTitle;
     // Sentence-grouped projections of {@link #latestLines}. Rebuilt whenever
     // the cue list or its translations change. {@link #sentenceLines} is the
     // MODE1 (cue-aligned) view; {@link #sentenceLinesStrict} is the MODE2
@@ -228,6 +274,13 @@ public class PlayerActivity extends AppCompatActivity
             finish();
             return;
         }
+        pendingSeekMs = getIntent().getLongExtra(EXTRA_SEEK_MS, -1L);
+
+        // Apply user prefs (set in SettingsActivity) to this session.
+        // Each one is "set the field to whatever the prefs say"; the
+        // existing button/menu wiring will pick up the new state on
+        // first onPageFinished re-push.
+        applyUserPreferences();
 
         webView = findViewById(R.id.webview_player);
         webProgress = findViewById(R.id.web_progress);
@@ -236,6 +289,7 @@ public class PlayerActivity extends AppCompatActivity
         subtitleOverlay = findViewById(R.id.subtitle_overlay);
         tvOverlayEn = findViewById(R.id.tv_overlay_en);
         tvOverlayVi = findViewById(R.id.tv_overlay_vi);
+        bindOverlayStyling();
         playerActionBar = findViewById(R.id.player_action_bar);
         fullscreenTapArea = findViewById(R.id.fullscreen_tap_area);
         btnFullscreenPlayPause = findViewById(R.id.btn_fullscreen_play_pause);
@@ -285,6 +339,7 @@ public class PlayerActivity extends AppCompatActivity
         syncController.setListener(this::onActiveLineChanged);
         applyStateToSheet();
         loadSubtitlesAsync(videoId);
+        recordHistory(videoId);
     }
 
     /**
@@ -316,6 +371,15 @@ public class PlayerActivity extends AppCompatActivity
 
         btnEnterFullscreen.setOnClickListener(v -> requestFullscreenOrientation(true));
         applyLangMode();
+        // Reflect prefs-derived combine + loop state on the buttons.
+        // applyCombineMode short-circuits when next == current, so we
+        // toggle the selected flags directly here.
+        if (btnCombineLines != null)
+            btnCombineLines.setSelected(combineMode == CombineMode.MODE1);
+        if (btnCombineLinesStrict != null)
+            btnCombineLinesStrict.setSelected(combineMode == CombineMode.MODE2);
+        if (btnLoopVideo != null)
+            btnLoopVideo.setSelected(loopVideoEnabled);
     }
 
     /**
@@ -360,9 +424,18 @@ public class PlayerActivity extends AppCompatActivity
         btnEditSubtitle.setOnClickListener(v -> toggleEditSubtitleMode(btnEditSubtitle));
         TextView btnPlaybackSpeed = findViewById(R.id.btn_playback_speed);
         btnPlaybackSpeed.setOnClickListener(v -> showPlaybackSpeedMenu(btnPlaybackSpeed));
-        findViewById(R.id.btn_download_srt).setOnClickListener(v ->
-                Toast.makeText(this, R.string.download_srt_not_yet,
-                        Toast.LENGTH_SHORT).show());
+        // Reflect any prefs-derived non-1x speed on the button label
+        // (the WebView-side push happens in onPageFinished).
+        if (Math.abs(playbackRate - 1.0f) > 0.001f) {
+            btnPlaybackSpeed.setText(formatRate(playbackRate));
+            btnPlaybackSpeed.setSelected(true);
+        }
+        findViewById(R.id.btn_import_srt).setOnClickListener(v -> launchSrtPicker());
+
+        Button btnFallbackImport = findViewById(R.id.btn_fallback_import_srt);
+        if (btnFallbackImport != null) {
+            btnFallbackImport.setOnClickListener(v -> launchSrtPicker());
+        }
     }
 
     /** Toggle the inline subtitle panel — user wants to focus on the video. */
@@ -391,6 +464,21 @@ public class PlayerActivity extends AppCompatActivity
             public void onProgressChanged(WebView view, int newProgress) {
                 webProgress.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
                 webProgress.setProgress(newProgress);
+            }
+
+            @Override
+            public void onReceivedTitle(WebView view, String title) {
+                // YT page titles look like "<video> - YouTube"; strip
+                // the trailing " - YouTube" so the history list stays
+                // tidy. Falls through gracefully if the suffix is gone.
+                if (videoId == null || title == null) return;
+                String stripped = title;
+                int idx = stripped.lastIndexOf(" - YouTube");
+                if (idx > 0) stripped = stripped.substring(0, idx);
+                stripped = stripped.trim();
+                if (stripped.isEmpty()) return;
+                currentVideoTitle = stripped;
+                updateHistoryTitle(videoId, stripped);
             }
 
             @Override
@@ -552,11 +640,13 @@ public class PlayerActivity extends AppCompatActivity
         Log.d(TAG, "WebView navigated videoId " + videoId + " -> " + newId);
         videoId = newId;
         latestLines = Collections.emptyList();
+        currentVideoTitle = null;
         state = SubtitleState.LOADING;
         syncController.attach(Collections.emptyList());
         resetAuxiliaryStateForNewVideo();
         applyStateToSheet();
         loadSubtitlesAsync(newId);
+        recordHistory(newId);
     }
 
     @Nullable
@@ -601,17 +691,20 @@ public class PlayerActivity extends AppCompatActivity
                 || btnRetryFetch == null) {
             return;
         }
+        Button fallbackImport = findViewById(R.id.btn_fallback_import_srt);
         switch (state) {
             case LOADING:
                 subtitleProgress.setVisibility(View.VISIBLE);
                 bannerNoSubtitle.setVisibility(View.GONE);
                 btnRetryFetch.setVisibility(View.GONE);
+                if (fallbackImport != null) fallbackImport.setVisibility(View.GONE);
                 adapter.submit(Collections.emptyList());
                 break;
             case READY:
                 subtitleProgress.setVisibility(View.GONE);
                 bannerNoSubtitle.setVisibility(View.GONE);
                 btnRetryFetch.setVisibility(View.GONE);
+                if (fallbackImport != null) fallbackImport.setVisibility(View.GONE);
                 adapter.submit(activeLines());
                 break;
             case NO_SUBTITLE:
@@ -619,6 +712,8 @@ public class PlayerActivity extends AppCompatActivity
                 bannerMessage.setText(R.string.no_subtitle_banner);
                 bannerNoSubtitle.setVisibility(View.VISIBLE);
                 btnRetryFetch.setVisibility(View.GONE);
+                // No CC available → still let the user import their own SRT.
+                if (fallbackImport != null) fallbackImport.setVisibility(View.VISIBLE);
                 adapter.submit(Collections.emptyList());
                 break;
             case FETCH_FAILED:
@@ -626,6 +721,7 @@ public class PlayerActivity extends AppCompatActivity
                 bannerMessage.setText(R.string.fetch_failed_message);
                 bannerNoSubtitle.setVisibility(View.VISIBLE);
                 btnRetryFetch.setVisibility(View.VISIBLE);
+                if (fallbackImport != null) fallbackImport.setVisibility(View.VISIBLE);
                 adapter.submit(Collections.emptyList());
                 break;
         }
@@ -636,6 +732,18 @@ public class PlayerActivity extends AppCompatActivity
     @Override
     public void onReady() {
         Log.d(TAG, "WebView <video> element ready");
+        // Consume any caller-requested seek (e.g. opened from a
+        // bookmark deep-link). Done here — not in onPageFinished —
+        // because the <video> element isn't valid until the bridge
+        // signals ready.
+        consumePendingSeek();
+    }
+
+    private void consumePendingSeek() {
+        if (pendingSeekMs < 0 || webView == null) return;
+        final long ms = pendingSeekMs;
+        pendingSeekMs = -1L;
+        WebViewPlayerBridge.seekTo(webView, ms / 1000.0);
     }
 
     @Override
@@ -922,6 +1030,8 @@ public class PlayerActivity extends AppCompatActivity
         entity.startMs = line.startMs;
         entity.endMs = line.endMs;
         entity.textEn = line.textEn != null ? line.textEn : "";
+        entity.textVi = line.textVi;
+        entity.videoTitle = currentVideoTitle;
         entity.createdAt = System.currentTimeMillis();
         final String capturedVideo = videoId;
         io.execute(() -> {
@@ -1389,6 +1499,213 @@ public class PlayerActivity extends AppCompatActivity
     }
 
     // --- Subtitle fetch ------------------------------------------------------
+
+    /**
+     * Sprint 6: insert/update the {@code history} row for this video.
+     * Title arrives later via {@link WebChromeClient#onReceivedTitle}
+     * (see {@link #updateHistoryTitle}); the initial upsert just
+     * captures the videoId, default thumbnail, and watched-at
+     * timestamp so the row already exists by the time the title
+     * lands.
+     */
+    /**
+     * Reads SharedPreferences (written by SettingsFragment) and seeds
+     * the corresponding fields. Called once from onCreate before the
+     * UI bindings run, so the buttons pick up the right initial state
+     * without an extra refresh pass.
+     */
+    private void applyUserPreferences() {
+        android.content.SharedPreferences sp =
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+
+        // Lang mode default
+        String langStr = sp.getString(com.joy.englishtube.util.PrefsKeys.LANG_MODE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_LANG_MODE);
+        try {
+            langMode = LangMode.valueOf(langStr);
+        } catch (IllegalArgumentException ignored) { /* fallback to current */ }
+
+        // Combine mode default
+        String combineStr = sp.getString(com.joy.englishtube.util.PrefsKeys.COMBINE_MODE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_COMBINE_MODE);
+        try {
+            combineMode = CombineMode.valueOf(combineStr);
+        } catch (IllegalArgumentException ignored) { /* fallback to NONE */ }
+
+        // Playback speed default
+        String speedStr = sp.getString(com.joy.englishtube.util.PrefsKeys.PLAYBACK_SPEED,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_PLAYBACK_SPEED);
+        try {
+            playbackRate = Float.parseFloat(speedStr);
+        } catch (NumberFormatException ignored) {
+            playbackRate = 1.0f;
+        }
+
+        // Loop default
+        loopVideoEnabled = sp.getBoolean(com.joy.englishtube.util.PrefsKeys.LOOP_VIDEO,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_LOOP_VIDEO);
+
+        // Translation engine
+        String engine = sp.getString(com.joy.englishtube.util.PrefsKeys.TRANSLATION_SERVICE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_TRANSLATION_SERVICE);
+        switch (engine == null ? "GOOGLE" : engine) {
+            case "MLKIT":
+                translationService = new MlKitTranslateService();
+                break;
+            case "AUTO":
+                translationService = new AutoTranslateService(
+                        new GoogleTranslateService(http),
+                        new MlKitTranslateService());
+                break;
+            case "GOOGLE":
+            default:
+                translationService = new GoogleTranslateService(http);
+                break;
+        }
+
+        // Overlay styling: font size in sp, opacity 0..100 → alpha 0..255.
+        int fontSp = sp.getInt(com.joy.englishtube.util.PrefsKeys.OVERLAY_FONT_SIZE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_FONT_SIZE_SP);
+        int opacity = sp.getInt(com.joy.englishtube.util.PrefsKeys.OVERLAY_OPACITY,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_OPACITY_PERCENT);
+        // Defer applying to the views until they're inflated. Cache the
+        // values now and let bindOverlayStyling() pick them up.
+        pendingOverlayFontSp = fontSp;
+        pendingOverlayOpacityPercent = opacity;
+    }
+
+    private int pendingOverlayFontSp = com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_FONT_SIZE_SP;
+    private int pendingOverlayOpacityPercent = com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_OPACITY_PERCENT;
+
+    /**
+     * Apply pending overlay styling (font size + scrim alpha) to the
+     * inflated overlay views. Called once {@link #subtitleOverlay} is
+     * resolved from the layout. Safe to call multiple times.
+     */
+    private void bindOverlayStyling() {
+        if (tvOverlayEn != null) {
+            tvOverlayEn.setTextSize(pendingOverlayFontSp);
+        }
+        if (tvOverlayVi != null) {
+            // Vietnamese row sits at ~80% of the EN row, mimicking the
+            // hard-coded 20sp/16sp ratio in the original layout.
+            tvOverlayVi.setTextSize(pendingOverlayFontSp * 0.8f);
+        }
+        if (subtitleOverlay != null) {
+            int alpha = (int) Math.round(pendingOverlayOpacityPercent * 255.0 / 100.0);
+            alpha = Math.max(0, Math.min(255, alpha));
+            // Black scrim with user-selected alpha.
+            subtitleOverlay.setBackgroundColor((alpha << 24));
+        }
+    }
+
+    /**
+     * Open the system file picker filtered to text/* (most pickers
+     * also surface .srt under that umbrella). The result lands in
+     * {@link #srtPickerLauncher}'s callback.
+     */
+    private void launchSrtPicker() {
+        // Multiple MIME hints because a fair number of stock pickers
+        // refuse to show .srt under text/* alone.
+        srtPickerLauncher.launch(new String[]{
+                "application/x-subrip",
+                "text/srt",
+                "text/plain",
+                "*/*"
+        });
+    }
+
+    /**
+     * Read the picked .srt file via ContentResolver, parse with
+     * {@link com.joy.englishtube.util.SrtParser}, and (on success) feed
+     * the lines into the player exactly as if they had been auto-fetched.
+     * Also caches them under the current videoId so a re-open of the
+     * same video still picks them up offline.
+     */
+    private void importSrtFromUri(@NonNull Uri uri) {
+        final String captured = videoId;
+        io.execute(() -> {
+            String text;
+            try (java.io.InputStream is =
+                         getContentResolver().openInputStream(uri);
+                 java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                if (is == null) {
+                    runOnUiThread(() -> Toast.makeText(this,
+                            R.string.import_srt_failed, Toast.LENGTH_SHORT).show());
+                    return;
+                }
+                byte[] buf = new byte[8 * 1024];
+                int n;
+                while ((n = is.read(buf)) >= 0) out.write(buf, 0, n);
+                text = out.toString("UTF-8");
+            } catch (java.io.IOException e) {
+                Log.w(TAG, "SRT read failed for " + uri, e);
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.import_srt_failed, Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            final List<SubtitleLine> lines =
+                    com.joy.englishtube.util.SrtParser.parse(text);
+            if (lines.isEmpty()) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.import_srt_empty, Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            // Persist to the EN cache so a re-open of this video reads
+            // the imported SRT instead of refetching from YT.
+            if (captured != null && captured.equals(videoId)) {
+                try {
+                    writeCache(captured, lines);
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "SRT cache write failed for " + captured, e);
+                }
+            }
+
+            runOnUiThread(() -> {
+                if (captured == null || !captured.equals(videoId)) return;
+                applyLines(lines);
+                Toast.makeText(this,
+                        getString(R.string.import_srt_success, lines.size()),
+                        Toast.LENGTH_SHORT).show();
+            });
+        });
+    }
+
+    private void recordHistory(@Nullable String id) {
+        if (id == null || id.isEmpty()) return;
+        final String captured = id;
+        final long now = System.currentTimeMillis();
+        EnglishTubeApp.get().getDbExecutor().execute(() -> {
+            HistoryDao dao = EnglishTubeApp.get().getDatabase().historyDao();
+            HistoryEntity existing = dao.findById(captured);
+            HistoryEntity row = existing != null ? existing : new HistoryEntity();
+            row.videoId = captured;
+            row.lastWatchedAt = now;
+            if (row.thumbnailUrl == null || row.thumbnailUrl.isEmpty()) {
+                row.thumbnailUrl = "https://i.ytimg.com/vi/" + captured + "/mqdefault.jpg";
+            }
+            // lastPositionMs / durationMs are deliberately left at 0 —
+            // resume-from-position is out of scope for Sprint 6.
+            dao.upsert(row);
+        });
+    }
+
+    /**
+     * Updates just the title field of the history row, called once
+     * the WebView reports the page title. We don't overwrite an
+     * existing title with an empty one.
+     */
+    private void updateHistoryTitle(@NonNull String id, @NonNull String title) {
+        EnglishTubeApp.get().getDbExecutor().execute(() -> {
+            HistoryDao dao = EnglishTubeApp.get().getDatabase().historyDao();
+            HistoryEntity existing = dao.findById(id);
+            if (existing == null) return;
+            existing.title = title;
+            dao.upsert(existing);
+        });
+    }
 
     private void loadSubtitlesAsync(@NonNull String requestedId) {
         io.execute(() -> {
