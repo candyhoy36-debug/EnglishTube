@@ -92,6 +92,13 @@ public class PlayerActivity extends AppCompatActivity
         implements WebViewPlayerBridge.Callback {
 
     public static final String EXTRA_VIDEO_ID = "extra_video_id";
+    /**
+     * Optional seek-to position in milliseconds. Caller (e.g. Bookmark
+     * deep-link) sets this when they want playback to resume at a
+     * specific cue rather than from the start. Consumed once on the
+     * first {@link #onReady()} that follows the matching videoId.
+     */
+    public static final String EXTRA_SEEK_MS = "extra_seek_ms";
 
     private static final String TAG = "PlayerActivity";
     private static final String SUBTITLE_LANG_EN = "en";
@@ -105,8 +112,27 @@ public class PlayerActivity extends AppCompatActivity
         return i;
     }
 
+    /**
+     * Variant that asks the player to seek to {@code seekMs} once the
+     * video element is ready. Use this for "open this bookmark" /
+     * "open at this timestamp" deep-links.
+     */
+    @NonNull
+    public static Intent intent(@NonNull Context ctx, @NonNull String videoId,
+                                long seekMs) {
+        Intent i = intent(ctx, videoId);
+        i.putExtra(EXTRA_SEEK_MS, seekMs);
+        return i;
+    }
+
     @Nullable
     private String videoId;
+    /**
+     * Pending seek-to position from {@link #EXTRA_SEEK_MS}. Cleared
+     * the first time we successfully apply it. Negative when no seek
+     * was requested.
+     */
+    private long pendingSeekMs = -1L;
 
     private WebView webView;
     private ProgressBar webProgress;
@@ -248,6 +274,7 @@ public class PlayerActivity extends AppCompatActivity
             finish();
             return;
         }
+        pendingSeekMs = getIntent().getLongExtra(EXTRA_SEEK_MS, -1L);
 
         // Apply user prefs (set in SettingsActivity) to this session.
         // Each one is "set the field to whatever the prefs say"; the
@@ -705,6 +732,18 @@ public class PlayerActivity extends AppCompatActivity
     @Override
     public void onReady() {
         Log.d(TAG, "WebView <video> element ready");
+        // Consume any caller-requested seek (e.g. opened from a
+        // bookmark deep-link). Done here — not in onPageFinished —
+        // because the <video> element isn't valid until the bridge
+        // signals ready.
+        consumePendingSeek();
+    }
+
+    private void consumePendingSeek() {
+        if (pendingSeekMs < 0 || webView == null) return;
+        final long ms = pendingSeekMs;
+        pendingSeekMs = -1L;
+        WebViewPlayerBridge.seekTo(webView, ms / 1000.0);
     }
 
     @Override

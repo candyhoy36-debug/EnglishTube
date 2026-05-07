@@ -70,7 +70,11 @@ public class BookmarkActivity extends AppCompatActivity {
 
         adapter = new BookmarkAdapter(new BookmarkAdapter.Listener() {
             @Override public void onClick(@NonNull BookmarkEntity row) {
-                startActivity(PlayerActivity.intent(BookmarkActivity.this, row.videoId));
+                // Tapping a bookmark deep-links into PlayerActivity at
+                // the cue's start so the user lands on the sentence
+                // they bookmarked instead of the start of the video.
+                startActivity(PlayerActivity.intent(
+                        BookmarkActivity.this, row.videoId, row.startMs));
             }
             @Override public void onLongPress(@NonNull BookmarkEntity row) {
                 showActionMenu(row);
