@@ -34,6 +34,14 @@
     <string name="subtitle_panel_title">Phụ đề</string>
     <string name="fab_subtitles_description">Bật/tắt bảng phụ đề</string>
 
+    <!-- Main activity: paste URL dialog -->
+    <string name="action_paste_url">Dán URL</string>
+    <string name="paste_url_dialog_title">Phát từ URL YouTube</string>
+    <string name="paste_url_dialog_hint">Dán hoặc nhập URL YouTube</string>
+    <string name="paste_url_invalid">URL không hợp lệ. Hãy dán liên kết video YouTube.</string>
+    <string name="paste_url_play">Phát</string>
+    <string name="paste_url_cancel">Hủy</string>
+
     <!-- Player auxiliary action bar -->
     <string name="action_combine_lines">Ghép câu</string>
     <string name="action_combine_lines_strict">Ghép câu 2</string>

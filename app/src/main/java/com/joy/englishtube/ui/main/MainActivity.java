@@ -1,11 +1,17 @@
 package com.joy.englishtube.ui.main;
 
 import android.annotation.SuppressLint;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.EditText;
+import android.widget.Toast;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -17,6 +23,7 @@ import android.widget.ProgressBar;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -216,7 +223,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.action_history) {
+        if (id == R.id.action_paste_url) {
+            showPasteUrlDialog();
+            return true;
+        } else if (id == R.id.action_history) {
             startActivity(new Intent(this, HistoryActivity.class));
             return true;
         } else if (id == R.id.action_bookmarks) {
@@ -227,6 +237,66 @@ public class MainActivity extends AppCompatActivity {
             return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    /**
+     * Opens a dialog where the user can paste a YouTube URL and tap Phát to
+     * jump straight into PlayerActivity. The EditText is pre-filled with
+     * clipboard contents when the clipboard already holds a recognisable
+     * YouTube URL — otherwise the user pastes manually.
+     */
+    private void showPasteUrlDialog() {
+        EditText input = new EditText(this);
+        input.setHint(R.string.paste_url_dialog_hint);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        input.setSingleLine(true);
+
+        String clipUrl = readYoutubeUrlFromClipboard();
+        if (clipUrl != null) {
+            input.setText(clipUrl);
+            input.setSelection(clipUrl.length());
+        }
+
+        int paddingPx = (int) (getResources().getDisplayMetrics().density * 20);
+        android.widget.FrameLayout container = new android.widget.FrameLayout(this);
+        container.setPadding(paddingPx, paddingPx / 2, paddingPx, 0);
+        container.addView(input);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.paste_url_dialog_title)
+                .setView(container)
+                .setPositiveButton(R.string.paste_url_play, null) // overridden below
+                .setNegativeButton(R.string.paste_url_cancel, (d, w) -> d.dismiss())
+                .create();
+        // Override Phát click so we can validate without auto-dismissing on
+        // failure (the default positive-button listener always dismisses).
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    String raw = input.getText() == null
+                            ? "" : input.getText().toString().trim();
+                    String videoId = VideoIdExtractor.extract(raw);
+                    if (videoId == null) {
+                        input.setError(getString(R.string.paste_url_invalid));
+                        Toast.makeText(this, R.string.paste_url_invalid,
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    dialog.dismiss();
+                    startActivity(PlayerActivity.intent(this, videoId));
+                }));
+        dialog.show();
+    }
+
+    @Nullable
+    private String readYoutubeUrlFromClipboard() {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null || !cm.hasPrimaryClip()) return null;
+        ClipData clip = cm.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) return null;
+        CharSequence text = clip.getItemAt(0).coerceToText(this);
+        if (text == null) return null;
+        String s = text.toString().trim();
+        return VideoIdExtractor.extract(s) != null ? s : null;
     }
 
     @Override
