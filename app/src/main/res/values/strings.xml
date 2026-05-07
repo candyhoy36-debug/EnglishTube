@@ -16,6 +16,14 @@
     <string name="history_days_ago">%1$d ngày trước</string>
     <string name="action_delete">Xóa</string>
     <string name="action_cancel">Hủy</string>
+    <string name="action_save">Lưu</string>
+    <string name="bookmark_empty">Chưa có bookmark nào.</string>
+    <string name="bookmark_clear_all">Xóa tất cả</string>
+    <string name="bookmark_clear_confirm">Xóa toàn bộ bookmark?</string>
+    <string name="bookmark_delete_confirm">Xóa bookmark này?</string>
+    <string name="bookmark_search_hint">Tìm trong bookmark…</string>
+    <string name="bookmark_edit_note">Ghi chú</string>
+    <string name="bookmark_note_hint">Nhập ghi chú (tùy chọn)…</string>
 
     <!-- Navigation -->
     <string name="nav_back">Quay lại</string>

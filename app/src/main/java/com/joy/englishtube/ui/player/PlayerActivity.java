@@ -211,6 +211,14 @@ public class PlayerActivity extends AppCompatActivity
     private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
     private SubtitleState state = SubtitleState.LOADING;
     private List<SubtitleLine> latestLines = Collections.emptyList();
+    /**
+     * Sprint 6: title reported by {@link WebChromeClient#onReceivedTitle}.
+     * Captured so {@link #bookmarkActiveLine()} can store the title with
+     * the bookmark row (BookmarkEntity.videoTitle), letting BookmarkActivity
+     * display human-readable group headers without an extra DB join.
+     */
+    @Nullable
+    private String currentVideoTitle;
     // Sentence-grouped projections of {@link #latestLines}. Rebuilt whenever
     // the cue list or its translations change. {@link #sentenceLines} is the
     // MODE1 (cue-aligned) view; {@link #sentenceLinesStrict} is the MODE2
@@ -407,6 +415,7 @@ public class PlayerActivity extends AppCompatActivity
                 if (idx > 0) stripped = stripped.substring(0, idx);
                 stripped = stripped.trim();
                 if (stripped.isEmpty()) return;
+                currentVideoTitle = stripped;
                 updateHistoryTitle(videoId, stripped);
             }
 
@@ -569,6 +578,7 @@ public class PlayerActivity extends AppCompatActivity
         Log.d(TAG, "WebView navigated videoId " + videoId + " -> " + newId);
         videoId = newId;
         latestLines = Collections.emptyList();
+        currentVideoTitle = null;
         state = SubtitleState.LOADING;
         syncController.attach(Collections.emptyList());
         resetAuxiliaryStateForNewVideo();
@@ -940,6 +950,8 @@ public class PlayerActivity extends AppCompatActivity
         entity.startMs = line.startMs;
         entity.endMs = line.endMs;
         entity.textEn = line.textEn != null ? line.textEn : "";
+        entity.textVi = line.textVi;
+        entity.videoTitle = currentVideoTitle;
         entity.createdAt = System.currentTimeMillis();
         final String capturedVideo = videoId;
         io.execute(() -> {
