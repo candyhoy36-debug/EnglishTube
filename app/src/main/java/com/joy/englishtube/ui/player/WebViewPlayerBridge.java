@@ -111,6 +111,7 @@ public class WebViewPlayerBridge {
             + "          }"
             + "        }"
             + "      }"
+            + "      try { v.loop = !!window.__etubeLoopVideo; } catch (e) {}"
             + "      var paused = !!v.paused;"
             + "      if (paused !== lastPaused) {"
             + "        lastPaused = paused;"
@@ -183,6 +184,28 @@ public class WebViewPlayerBridge {
                         + "||document.querySelector('video');"
                         + "if(v && v.play) v.play();})();",
                 null);
+    }
+
+    /**
+     * Sprint 5 follow-up: enable/disable HTML5 native looping on the YT
+     * {@code <video>} element. Setting {@code video.loop = true} makes the
+     * browser silently rewind on {@code ended}, which prevents YouTube's
+     * own auto-play-next handler from kicking in (the {@code ended} event
+     * never fires when {@code loop} is true).
+     *
+     * The preference is stored on {@code window.__etubeLoopVideo} so the
+     * polling loop in {@link #JS_INSTALL} keeps re-applying it across YT
+     * SPA transitions and {@code <video>} element re-creations.
+     */
+    @UiThread
+    public static void setLoopVideo(@NonNull WebView webView, boolean enabled) {
+        String js = "(function(){"
+                + "window.__etubeLoopVideo = " + (enabled ? "true" : "false") + ";"
+                + "var v=document.querySelector('video.video-stream')"
+                + "||document.querySelector('video');"
+                + "if(v){try{v.loop=" + (enabled ? "true" : "false") + ";}catch(e){}}"
+                + "})();";
+        webView.evaluateJavascript(js, null);
     }
 
     /**

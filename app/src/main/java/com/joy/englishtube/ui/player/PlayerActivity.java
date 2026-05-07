@@ -112,6 +112,7 @@ public class PlayerActivity extends AppCompatActivity
     private TextView btnCombineLines;
     private TextView btnCombineLinesStrict;
     private TextView btnLoopLine;
+    private TextView btnLoopVideo;
     private TextView btnBookmarkLine;
     private TextView btnLangMode;
     private TextView btnEnterFullscreen;
@@ -162,6 +163,12 @@ public class PlayerActivity extends AppCompatActivity
     // --- Auxiliary feature state ---
     private int activeLineIndex = -1;
     private boolean loopLineEnabled = false;
+    /**
+     * Sprint 5 follow-up: when true, the underlying YT &lt;video&gt;
+     * element gets {@code loop = true} so playback restarts at the
+     * beginning instead of YouTube auto-playing the next video.
+     */
+    private boolean loopVideoEnabled = false;
     private long loopStartMs = -1L;
     private long loopEndMs = -1L;
     private LangMode langMode = LangMode.EN;
@@ -277,6 +284,7 @@ public class PlayerActivity extends AppCompatActivity
         btnCombineLines = findViewById(R.id.btn_combine_lines);
         btnCombineLinesStrict = findViewById(R.id.btn_combine_lines_strict);
         btnLoopLine = findViewById(R.id.btn_loop_line);
+        btnLoopVideo = findViewById(R.id.btn_loop_video);
         btnBookmarkLine = findViewById(R.id.btn_bookmark_line);
         btnLangMode = findViewById(R.id.btn_lang_mode);
         btnEnterFullscreen = findViewById(R.id.btn_enter_fullscreen);
@@ -286,6 +294,8 @@ public class PlayerActivity extends AppCompatActivity
         btnCombineLinesStrict.setOnClickListener(v -> toggleCombineLinesMode2());
 
         btnLoopLine.setOnClickListener(v -> toggleLoopLine());
+
+        btnLoopVideo.setOnClickListener(v -> toggleLoopVideo());
 
         btnBookmarkLine.setOnClickListener(v -> bookmarkActiveLine());
 
@@ -405,6 +415,11 @@ public class PlayerActivity extends AppCompatActivity
                 // SPA transitions (auto-play next, redirects to login wall, …)
                 // still get hooked.
                 new WebViewPlayerBridge(PlayerActivity.this).install(v);
+                // Re-apply the user's loop-video preference: a page reload
+                // / SPA nav rebuilds the <video> element from scratch.
+                if (loopVideoEnabled) {
+                    WebViewPlayerBridge.setLoopVideo(v, true);
+                }
                 // Sprint 5: hide YT's own fullscreen button. We drive
                 // fullscreen from device rotation, and YT's button puts
                 // the page into a weird half-fullscreen state where
@@ -808,6 +823,19 @@ public class PlayerActivity extends AppCompatActivity
             loopEndMs = -1L;
         }
         if (btnLoopLine != null) btnLoopLine.setSelected(loopLineEnabled);
+    }
+
+    /**
+     * Toggles whole-video looping. Drives the HTML5 {@code video.loop}
+     * flag through {@link WebViewPlayerBridge#setLoopVideo}, which keeps
+     * it applied across YT SPA navigations via the polling loop.
+     */
+    private void toggleLoopVideo() {
+        loopVideoEnabled = !loopVideoEnabled;
+        if (btnLoopVideo != null) btnLoopVideo.setSelected(loopVideoEnabled);
+        if (webView != null) {
+            WebViewPlayerBridge.setLoopVideo(webView, loopVideoEnabled);
+        }
     }
 
     private void bookmarkActiveLine() {
