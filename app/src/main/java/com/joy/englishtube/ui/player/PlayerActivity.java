@@ -9,6 +9,8 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -219,7 +221,7 @@ public class PlayerActivity extends AppCompatActivity
         btnFullscreenPlayPause = findViewById(R.id.btn_fullscreen_play_pause);
         btnExitFullscreen = findViewById(R.id.btn_exit_fullscreen);
         if (fullscreenTapArea != null) {
-            fullscreenTapArea.setOnClickListener(v -> onFullscreenTap());
+            attachFullscreenTapGestures(fullscreenTapArea);
         }
         if (btnFullscreenPlayPause != null) {
             btnFullscreenPlayPause.setOnClickListener(v -> onFullscreenTap());
@@ -693,6 +695,65 @@ public class PlayerActivity extends AppCompatActivity
             btnFullscreenPlayPause.setVisibility(View.GONE);
         }
     };
+
+    /**
+     * Wires fullscreen tap gestures to the transparent overlay layer that
+     * sits on top of the YT video surface. Single tap toggles play/pause;
+     * double-tap on the left half jumps to the previous subtitle line and
+     * double-tap on the right half jumps to the next one. Coordinates are
+     * relative to the view, so the split is always at the visual midpoint.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private void attachFullscreenTapGestures(@NonNull View tapArea) {
+        GestureDetector detector = new GestureDetector(this,
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onSingleTapConfirmed(MotionEvent e) {
+                        onFullscreenTap();
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onDoubleTap(MotionEvent e) {
+                        if (!isFullscreen) return false;
+                        int width = tapArea.getWidth();
+                        if (width <= 0) return false;
+                        if (e.getX() < width / 2f) {
+                            jumpToAdjacentLine(-1);
+                        } else {
+                            jumpToAdjacentLine(+1);
+                        }
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onDown(MotionEvent e) {
+                        // Required for the rest of the events to flow.
+                        return true;
+                    }
+                });
+        tapArea.setOnTouchListener((v, ev) -> detector.onTouchEvent(ev));
+    }
+
+    /**
+     * Seeks the player to the start of the line at {@code activeLineIndex
+     * + delta}, clamped to the active list. Reuses {@link #activeLines()}
+     * so it works in cue / sentence / sentence-strict modes alike.
+     */
+    private void jumpToAdjacentLine(int delta) {
+        if (webView == null) return;
+        List<SubtitleLine> list = activeLines();
+        if (list.isEmpty()) return;
+        int target = activeLineIndex + delta;
+        if (target < 0) target = 0;
+        if (target >= list.size()) target = list.size() - 1;
+        SubtitleLine line = list.get(target);
+        WebViewPlayerBridge.seekTo(webView, line.startMs / 1000.0);
+        // Optimistically update the highlight so the overlay text flips
+        // instantly; the sync controller will reconcile on the next tick.
+        activeLineIndex = target;
+        updateOverlayText();
+    }
 
     /**
      * Tap-to-toggle handler for fullscreen mode. Each tap on the video
