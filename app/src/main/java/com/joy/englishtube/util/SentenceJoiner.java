@@ -134,6 +134,178 @@ public final class SentenceJoiner {
         vi.setLength(0);
     }
 
+    // -- Strict mode (Ghép câu 2) -------------------------------------------
+    //
+    // Walks each cue's text character by character and flushes a sentence
+    // whenever a {@code .?!…} terminator is followed by whitespace or the
+    // end of the cue text. Unlike {@link #join}, this splits sentences in
+    // the middle of a cue ("...sweets, right? And the whole purpose"), so
+    // the user gets short, terminator-aligned sentences even when the
+    // SRT's cue boundaries don't line up with actual sentence endings.
+    //
+    // Vietnamese alignment: a sentence whose cue group is "clean" (every
+    // contributing cue had its full text consumed by this one sentence
+    // and a non-empty {@code textVi}) keeps its joined VI; if any cue is
+    // split mid-text or lacks VI, the sentence's {@code textVi} is
+    // dropped to {@code null} so the UI shows EN-only rather than a
+    // broken half-translation.
+
+    public static List<SubtitleLine> joinStrict(List<SubtitleLine> cues) {
+        if (cues == null || cues.isEmpty()) return Collections.emptyList();
+
+        List<SubtitleLine> out = new ArrayList<>();
+        StringBuilder en = new StringBuilder();
+        StringBuilder vi = new StringBuilder();
+        long startMs = -1L;
+        long endMs = -1L;
+        boolean allHaveVi = true;
+        boolean anyContent = false;
+
+        for (SubtitleLine cue : cues) {
+            if (cue == null) continue;
+            String e = cue.textEn == null ? "" : cue.textEn.trim();
+            String v = cue.textVi == null ? "" : cue.textVi.trim();
+
+            if (startMs < 0L) startMs = cue.startMs;
+            endMs = cue.endMs;
+
+            if (e.isEmpty()) continue;
+
+            int n = e.length();
+            int searchFrom = 0;
+            boolean cueSplit = false;
+            while (searchFrom < n) {
+                int sentEnd = findSentenceEnd(e, searchFrom);
+                boolean hasTerm = sentEnd > 0;
+                int chunkEnd = hasTerm ? sentEnd : n;
+                String chunk = e.substring(searchFrom, chunkEnd).trim();
+                if (!chunk.isEmpty()) {
+                    if (en.length() > 0) en.append(' ');
+                    en.append(chunk);
+                    anyContent = true;
+                }
+
+                boolean wholeCueConsumed = (searchFrom == 0 && chunkEnd == n);
+                if (wholeCueConsumed && !cueSplit) {
+                    if (!v.isEmpty()) {
+                        if (vi.length() > 0) vi.append(' ');
+                        vi.append(v);
+                    } else {
+                        allHaveVi = false;
+                    }
+                } else {
+                    // Sentence boundary fell inside this cue — VI for the
+                    // partial chunk can't be aligned, drop VI for the
+                    // whole sentence.
+                    allHaveVi = false;
+                }
+
+                if (!hasTerm) break;
+
+                flush(out, startMs, endMs, en, vi, allHaveVi && anyContent);
+                allHaveVi = true;
+                anyContent = false;
+                cueSplit = true;
+
+                searchFrom = sentEnd;
+                while (searchFrom < n && Character.isWhitespace(e.charAt(searchFrom))) {
+                    searchFrom++;
+                }
+                if (searchFrom < n) {
+                    // Next sentence starts inside the same cue; reuse its
+                    // span as a coarse approximation.
+                    startMs = cue.startMs;
+                    endMs = cue.endMs;
+                } else {
+                    startMs = -1L;
+                    endMs = -1L;
+                }
+            }
+        }
+
+        if (en.length() > 0) {
+            flush(out, startMs, endMs, en, vi, allHaveVi && anyContent);
+        }
+        return out;
+    }
+
+    public static int sentenceIndexForCueStrict(List<SubtitleLine> cues, int cueIndex) {
+        if (cues == null || cueIndex < 0 || cueIndex >= cues.size()) return -1;
+        int sentence = 0;
+        for (int i = 0; i < cueIndex; i++) {
+            SubtitleLine cue = cues.get(i);
+            String e = cue == null || cue.textEn == null ? "" : cue.textEn;
+            sentence += countTerminators(e);
+        }
+        return sentence;
+    }
+
+    public static int firstCueIndexForSentenceStrict(List<SubtitleLine> cues, int sentenceIndex) {
+        if (cues == null || sentenceIndex < 0) return -1;
+        int sentence = 0;
+        for (int i = 0; i < cues.size(); i++) {
+            SubtitleLine cue = cues.get(i);
+            String trimmed = cue == null || cue.textEn == null ? "" : cue.textEn.trim();
+            if (trimmed.isEmpty()) continue;
+            int terms = countTerminators(trimmed);
+            // Range of sentence indices this cue contributes to:
+            //   [sentence, sentence + terms - (endsClean ? 1 : 0)]
+            // so that a self-contained cue ("First.") covers exactly one
+            // sentence and a spillover cue with terminators inside covers
+            // one more (the trailing fragment).
+            boolean endsClean = endsSentence(trimmed);
+            int rangeEnd = sentence + terms - (endsClean ? 1 : 0);
+            if (rangeEnd < sentence) rangeEnd = sentence;
+            if (sentenceIndex >= sentence && sentenceIndex <= rangeEnd) return i;
+            sentence += terms;
+        }
+        return -1;
+    }
+
+    /**
+     * Returns the exclusive end index (just past the terminator + any
+     * trailing closing quotes/brackets) of the next sentence in
+     * {@code text} starting at {@code from}; -1 if no terminator is
+     * found before end of string. A {@code .?!…} only counts when the
+     * next non-quote/-bracket character is whitespace or end-of-string,
+     * so {@code "3.14"} doesn't split mid-token.
+     */
+    private static int findSentenceEnd(String text, int from) {
+        int n = text.length();
+        for (int i = from; i < n; i++) {
+            char c = text.charAt(i);
+            if (c == '.' || c == '?' || c == '!' || c == '\u2026') {
+                int j = i + 1;
+                while (j < n) {
+                    char d = text.charAt(j);
+                    if (d == '"' || d == '\'' || d == ')' || d == ']' || d == '}'
+                            || d == '\u201D' || d == '\u2019' || d == '\u00BB') {
+                        j++;
+                    } else {
+                        break;
+                    }
+                }
+                if (j >= n || Character.isWhitespace(text.charAt(j))) {
+                    return j;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static int countTerminators(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int count = 0;
+        int from = 0;
+        while (true) {
+            int end = findSentenceEnd(text, from);
+            if (end < 0) break;
+            count++;
+            from = end;
+        }
+        return count;
+    }
+
     /**
      * A cue terminates a sentence when, after stripping trailing closing
      * quotes / parentheses, its last character is one of {@code .?!…}. The

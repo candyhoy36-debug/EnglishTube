@@ -24,4 +24,9 @@
 
     <color name="player_action_bar_bg">#FFFFFFFF</color>
     <color name="player_action_active_bg">#1F1976D2</color>
+
+    <!-- Sprint 5 fullscreen overlay -->
+    <color name="overlay_scrim">#99000000</color>
+    <color name="overlay_text_en">#FFFFFFFF</color>
+    <color name="overlay_text_vi">#FFFFE57F</color>
 </resources>

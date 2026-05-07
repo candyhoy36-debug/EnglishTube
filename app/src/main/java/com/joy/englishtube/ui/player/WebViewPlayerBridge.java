@@ -47,6 +47,14 @@ public class WebViewPlayerBridge {
          * is laid out around it.
          */
         @UiThread void onVideoBottom(float cssPx);
+
+        /**
+         * Sprint 5 follow-up: fired when the &lt;video&gt; element's
+         * paused state flips. Lets the activity show the right icon on
+         * the fullscreen play/pause button and keep it visible while
+         * the video is paused.
+         */
+        @UiThread void onPlayState(boolean playing);
     }
 
     /** Name exposed to JS — referenced by {@link #JS_INSTALL}. */
@@ -69,6 +77,7 @@ public class WebViewPlayerBridge {
             + "  var notifiedReady = false;"
             + "  var lastHref = location.href;"
             + "  var lastBottom = -1;"
+            + "  var lastPaused = null;"
             + "  if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onLocation) {"
             + "    window." + "NAME_PLACEHOLDER" + ".onLocation(lastHref);"
             + "  }"
@@ -100,6 +109,18 @@ public class WebViewPlayerBridge {
             + "          if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onVideoBottom) {"
             + "            window." + "NAME_PLACEHOLDER" + ".onVideoBottom(b);"
             + "          }"
+            + "        }"
+            + "      }"
+            + "      try { v.loop = !!window.__etubeLoopVideo; } catch (e) {}"
+            + "      try {"
+            + "        var pr = +window.__etubePlaybackRate;"
+            + "        if (pr > 0 && Math.abs(v.playbackRate - pr) > 0.001) v.playbackRate = pr;"
+            + "      } catch (e) {}"
+            + "      var paused = !!v.paused;"
+            + "      if (paused !== lastPaused) {"
+            + "        lastPaused = paused;"
+            + "        if (window." + "NAME_PLACEHOLDER" + " && window." + "NAME_PLACEHOLDER" + ".onPlayState) {"
+            + "          window." + "NAME_PLACEHOLDER" + ".onPlayState(!paused);"
             + "        }"
             + "      }"
             + "      var t = v.currentTime;"
@@ -169,6 +190,62 @@ public class WebViewPlayerBridge {
                 null);
     }
 
+    /**
+     * Sprint 5 follow-up: enable/disable HTML5 native looping on the YT
+     * {@code <video>} element. Setting {@code video.loop = true} makes the
+     * browser silently rewind on {@code ended}, which prevents YouTube's
+     * own auto-play-next handler from kicking in (the {@code ended} event
+     * never fires when {@code loop} is true).
+     *
+     * The preference is stored on {@code window.__etubeLoopVideo} so the
+     * polling loop in {@link #JS_INSTALL} keeps re-applying it across YT
+     * SPA transitions and {@code <video>} element re-creations.
+     */
+    @UiThread
+    public static void setLoopVideo(@NonNull WebView webView, boolean enabled) {
+        String js = "(function(){"
+                + "window.__etubeLoopVideo = " + (enabled ? "true" : "false") + ";"
+                + "var v=document.querySelector('video.video-stream')"
+                + "||document.querySelector('video');"
+                + "if(v){try{v.loop=" + (enabled ? "true" : "false") + ";}catch(e){}}"
+                + "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    /**
+     * Sprint 5 follow-up: set HTML5 {@code video.playbackRate} on the YT
+     * {@code <video>} element. Stores the preference on
+     * {@code window.__etubePlaybackRate} so the polling loop in
+     * {@link #JS_INSTALL} re-applies it across YT SPA transitions and
+     * {@code <video>} element re-creations (player rebuilds, ad pre-rolls).
+     */
+    @UiThread
+    public static void setPlaybackRate(@NonNull WebView webView, float rate) {
+        String js = "(function(){"
+                + "window.__etubePlaybackRate = " + rate + ";"
+                + "var v=document.querySelector('video.video-stream')"
+                + "||document.querySelector('video');"
+                + "if(v){try{v.playbackRate=" + rate + ";}catch(e){}}"
+                + "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    /**
+     * Sprint 5 follow-up: toggle play/pause on the underlying
+     * {@code <video>}. Used by the fullscreen tap-to-toggle UI.
+     */
+    @UiThread
+    public static void togglePlay(@NonNull WebView webView) {
+        webView.evaluateJavascript(
+                "(function(){var v=document.querySelector('video.video-stream')"
+                        + "||document.querySelector('video');"
+                        + "if(!v) return;"
+                        + "if(v.paused){if(v.play) v.play();}"
+                        + "else{if(v.pause) v.pause();}"
+                        + "})();",
+                null);
+    }
+
     // --- @JavascriptInterface methods (called on JS thread) ------------------
 
     @JavascriptInterface
@@ -196,5 +273,11 @@ public class WebViewPlayerBridge {
     @WorkerThread
     public void onVideoBottom(float cssPx) {
         main.post(() -> callback.onVideoBottom(cssPx));
+    }
+
+    @JavascriptInterface
+    @WorkerThread
+    public void onPlayState(boolean playing) {
+        main.post(() -> callback.onPlayState(playing));
     }
 }

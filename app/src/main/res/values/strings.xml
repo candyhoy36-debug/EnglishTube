@@ -34,9 +34,19 @@
     <string name="subtitle_panel_title">Phụ đề</string>
     <string name="fab_subtitles_description">Bật/tắt bảng phụ đề</string>
 
+    <!-- Main activity: paste URL dialog -->
+    <string name="action_paste_url">Dán URL</string>
+    <string name="paste_url_dialog_title">Phát từ URL YouTube</string>
+    <string name="paste_url_dialog_hint">Dán hoặc nhập URL YouTube</string>
+    <string name="paste_url_invalid">URL không hợp lệ. Hãy dán liên kết video YouTube.</string>
+    <string name="paste_url_play">Phát</string>
+    <string name="paste_url_cancel">Hủy</string>
+
     <!-- Player auxiliary action bar -->
     <string name="action_combine_lines">Ghép câu</string>
+    <string name="action_combine_lines_strict">Ghép câu 2</string>
     <string name="action_loop_line">Lặp dòng</string>
+    <string name="action_loop_video">Lặp video</string>
     <string name="action_bookmark_line">Bookmark</string>
     <string name="lang_mode_en">EN</string>
     <string name="lang_mode_vi">VI</string>
@@ -46,11 +56,11 @@
     <string name="bookmark_saved">Đã bookmark dòng này.</string>
 
     <!-- Subtitle panel auxiliary action row (stubs for future sprints) -->
-    <string name="action_search_subtitle">Tìm</string>
+    <string name="action_edit_subtitle">Sửa phụ đề</string>
+    <string name="edit_subtitle_not_yet">Chỉnh sửa phụ đề sẽ có ở sprint sau.</string>
     <string name="action_playback_speed">Tốc độ</string>
     <string name="action_text_size">Cỡ chữ</string>
     <string name="action_download_srt">Tải SRT</string>
-    <string name="search_subtitle_not_yet">Tìm trong phụ đề sẽ có ở sprint sau.</string>
     <string name="playback_speed_not_yet">Đổi tốc độ phát sẽ có ở sprint sau.</string>
     <string name="text_size_not_yet">Tuỳ chỉnh cỡ chữ sẽ có ở sprint sau.</string>
     <string name="download_srt_not_yet">Tải xuống SRT sẽ có ở sprint sau.</string>
@@ -62,4 +72,7 @@
     <string name="dictionary_history_back">Quay lại trang trước</string>
     <string name="dictionary_close">Đóng từ điển</string>
     <string name="dictionary_long_press_hint">Giữ 1 từ trên dòng phụ đề để tra nghĩa.</string>
+    <string name="cd_play_pause">Phát / Tạm dừng</string>
+    <string name="action_enter_fullscreen">Toàn màn hình</string>
+    <string name="action_exit_fullscreen">Thoát toàn màn hình</string>
 </resources>

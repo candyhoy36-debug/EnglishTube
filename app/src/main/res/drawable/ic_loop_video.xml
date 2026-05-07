@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <!-- Circular arrow loop with a small play triangle inside, distinct from
+         "Lặp dòng" which uses a plain refresh/loop icon. -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,5V2L7,7l5,5V8c2.21,0 4,1.79 4,4 0,0.69 -0.18,1.34 -0.49,1.9l1.46,1.46C17.62,14.39 18,13.24 18,12 18,8.69 15.31,6 12,6V5z" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,16c-2.21,0 -4,-1.79 -4,-4 0,-0.69 0.18,-1.34 0.49,-1.9L7.03,8.64C6.38,9.61 6,10.76 6,12c0,3.31 2.69,6 6,6v3l5,-5 -5,-5v3z" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M10.5,9.5l4,2.5 -4,2.5z" />
+</vector>
