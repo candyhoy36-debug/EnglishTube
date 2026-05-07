@@ -216,19 +216,19 @@
             android:paddingVertical="6dp">
 
             <TextView
-                android:id="@+id/btn_search_subtitle"
+                android:id="@+id/btn_edit_subtitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:background="@drawable/bg_player_action_button"
                 android:clickable="true"
                 android:focusable="true"
-                android:drawableTop="@drawable/ic_search"
+                android:drawableTop="@drawable/ic_edit"
                 android:drawablePadding="2dp"
                 android:gravity="center"
                 android:paddingHorizontal="4dp"
                 android:paddingVertical="6dp"
-                android:text="@string/action_search_subtitle"
+                android:text="@string/action_edit_subtitle"
                 android:textColor="@color/text_primary"
                 android:textSize="11sp"
                 app:drawableTint="@color/text_primary" />

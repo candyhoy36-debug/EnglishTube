@@ -176,6 +176,12 @@ public class PlayerActivity extends AppCompatActivity
      * YT SPA navigations via {@link WebViewPlayerBridge}.
      */
     private float playbackRate = 1.0f;
+    /**
+     * Sprint 5 follow-up: edit-subtitle mode toggle. Wired up as a
+     * visible state flip on the button now; the actual editing UI
+     * lands in a later sprint.
+     */
+    private boolean editSubtitleMode = false;
     private long loopStartMs = -1L;
     private long loopEndMs = -1L;
     private LangMode langMode = LangMode.EN;
@@ -350,9 +356,8 @@ public class PlayerActivity extends AppCompatActivity
         // Stub buttons in the subtitle-panel action row. Real implementations
         // land in later sprints — for now each just toasts the planned ETA so
         // the user sees the row reacts.
-        findViewById(R.id.btn_search_subtitle).setOnClickListener(v ->
-                Toast.makeText(this, R.string.search_subtitle_not_yet,
-                        Toast.LENGTH_SHORT).show());
+        TextView btnEditSubtitle = findViewById(R.id.btn_edit_subtitle);
+        btnEditSubtitle.setOnClickListener(v -> toggleEditSubtitleMode(btnEditSubtitle));
         TextView btnPlaybackSpeed = findViewById(R.id.btn_playback_speed);
         btnPlaybackSpeed.setOnClickListener(v -> showPlaybackSpeedMenu(btnPlaybackSpeed));
         findViewById(R.id.btn_download_srt).setOnClickListener(v ->
@@ -880,6 +885,22 @@ public class PlayerActivity extends AppCompatActivity
         return String.format(java.util.Locale.US, "%.2f", rate)
                 .replaceAll("0+$", "")
                 .replaceAll("\\.$", "") + "x";
+    }
+
+    /**
+     * Toggle stub for the upcoming edit-subtitle mode. Flips a
+     * selected state on the button and tells the user the real
+     * editing UI is coming in a later sprint. The actual UI swap
+     * (turning each subtitle row into an editable field) will be
+     * implemented when we wire the persistence layer.
+     */
+    private void toggleEditSubtitleMode(@NonNull TextView btn) {
+        editSubtitleMode = !editSubtitleMode;
+        btn.setSelected(editSubtitleMode);
+        if (editSubtitleMode) {
+            Toast.makeText(this, R.string.edit_subtitle_not_yet,
+                    Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void toggleLoopVideo() {
