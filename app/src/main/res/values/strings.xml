@@ -99,7 +99,11 @@
     <string name="edit_subtitle_not_yet">Chỉnh sửa phụ đề sẽ có ở sprint sau.</string>
     <string name="action_playback_speed">Tốc độ</string>
     <string name="action_text_size">Cỡ chữ</string>
-    <string name="action_download_srt">Tải SRT</string>
+    <string name="action_import_srt">Nhập SRT</string>
+    <string name="import_srt_success">Đã nhập %1$d dòng phụ đề.</string>
+    <string name="import_srt_empty">Tệp SRT không có nội dung hợp lệ.</string>
+    <string name="import_srt_failed">Không đọc được tệp SRT.</string>
+    <string name="import_srt_fallback_hint">Hoặc nhập tệp SRT từ thiết bị</string>
     <string name="playback_speed_not_yet">Đổi tốc độ phát sẽ có ở sprint sau.</string>
     <string name="text_size_not_yet">Tuỳ chỉnh cỡ chữ sẽ có ở sprint sau.</string>
     <string name="download_srt_not_yet">Tải xuống SRT sẽ có ở sprint sau.</string>

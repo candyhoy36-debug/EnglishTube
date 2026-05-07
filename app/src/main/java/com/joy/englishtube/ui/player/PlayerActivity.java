@@ -31,6 +31,8 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.WindowCompat;
@@ -116,6 +118,15 @@ public class PlayerActivity extends AppCompatActivity
     private TextView btnCombineLinesStrict;
     private TextView btnLoopLine;
     private TextView btnLoopVideo;
+
+    /**
+     * SAF launcher for picking an .srt file off-device. Registered in
+     * onCreate; result is consumed by {@link #importSrtFromUri(Uri)}.
+     */
+    private final ActivityResultLauncher<String[]> srtPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+                if (uri != null) importSrtFromUri(uri);
+            });
     private TextView btnBookmarkLine;
     private TextView btnLangMode;
     private TextView btnEnterFullscreen;
@@ -392,9 +403,12 @@ public class PlayerActivity extends AppCompatActivity
             btnPlaybackSpeed.setText(formatRate(playbackRate));
             btnPlaybackSpeed.setSelected(true);
         }
-        findViewById(R.id.btn_download_srt).setOnClickListener(v ->
-                Toast.makeText(this, R.string.download_srt_not_yet,
-                        Toast.LENGTH_SHORT).show());
+        findViewById(R.id.btn_import_srt).setOnClickListener(v -> launchSrtPicker());
+
+        Button btnFallbackImport = findViewById(R.id.btn_fallback_import_srt);
+        if (btnFallbackImport != null) {
+            btnFallbackImport.setOnClickListener(v -> launchSrtPicker());
+        }
     }
 
     /** Toggle the inline subtitle panel — user wants to focus on the video. */
@@ -650,17 +664,20 @@ public class PlayerActivity extends AppCompatActivity
                 || btnRetryFetch == null) {
             return;
         }
+        Button fallbackImport = findViewById(R.id.btn_fallback_import_srt);
         switch (state) {
             case LOADING:
                 subtitleProgress.setVisibility(View.VISIBLE);
                 bannerNoSubtitle.setVisibility(View.GONE);
                 btnRetryFetch.setVisibility(View.GONE);
+                if (fallbackImport != null) fallbackImport.setVisibility(View.GONE);
                 adapter.submit(Collections.emptyList());
                 break;
             case READY:
                 subtitleProgress.setVisibility(View.GONE);
                 bannerNoSubtitle.setVisibility(View.GONE);
                 btnRetryFetch.setVisibility(View.GONE);
+                if (fallbackImport != null) fallbackImport.setVisibility(View.GONE);
                 adapter.submit(activeLines());
                 break;
             case NO_SUBTITLE:
@@ -668,6 +685,8 @@ public class PlayerActivity extends AppCompatActivity
                 bannerMessage.setText(R.string.no_subtitle_banner);
                 bannerNoSubtitle.setVisibility(View.VISIBLE);
                 btnRetryFetch.setVisibility(View.GONE);
+                // No CC available → still let the user import their own SRT.
+                if (fallbackImport != null) fallbackImport.setVisibility(View.VISIBLE);
                 adapter.submit(Collections.emptyList());
                 break;
             case FETCH_FAILED:
@@ -675,6 +694,7 @@ public class PlayerActivity extends AppCompatActivity
                 bannerMessage.setText(R.string.fetch_failed_message);
                 bannerNoSubtitle.setVisibility(View.VISIBLE);
                 btnRetryFetch.setVisibility(View.VISIBLE);
+                if (fallbackImport != null) fallbackImport.setVisibility(View.VISIBLE);
                 adapter.submit(Collections.emptyList());
                 break;
         }
@@ -1538,6 +1558,80 @@ public class PlayerActivity extends AppCompatActivity
             // Black scrim with user-selected alpha.
             subtitleOverlay.setBackgroundColor((alpha << 24));
         }
+    }
+
+    /**
+     * Open the system file picker filtered to text/* (most pickers
+     * also surface .srt under that umbrella). The result lands in
+     * {@link #srtPickerLauncher}'s callback.
+     */
+    private void launchSrtPicker() {
+        // Multiple MIME hints because a fair number of stock pickers
+        // refuse to show .srt under text/* alone.
+        srtPickerLauncher.launch(new String[]{
+                "application/x-subrip",
+                "text/srt",
+                "text/plain",
+                "*/*"
+        });
+    }
+
+    /**
+     * Read the picked .srt file via ContentResolver, parse with
+     * {@link com.joy.englishtube.util.SrtParser}, and (on success) feed
+     * the lines into the player exactly as if they had been auto-fetched.
+     * Also caches them under the current videoId so a re-open of the
+     * same video still picks them up offline.
+     */
+    private void importSrtFromUri(@NonNull Uri uri) {
+        final String captured = videoId;
+        io.execute(() -> {
+            String text;
+            try (java.io.InputStream is =
+                         getContentResolver().openInputStream(uri);
+                 java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                if (is == null) {
+                    runOnUiThread(() -> Toast.makeText(this,
+                            R.string.import_srt_failed, Toast.LENGTH_SHORT).show());
+                    return;
+                }
+                byte[] buf = new byte[8 * 1024];
+                int n;
+                while ((n = is.read(buf)) >= 0) out.write(buf, 0, n);
+                text = out.toString("UTF-8");
+            } catch (java.io.IOException e) {
+                Log.w(TAG, "SRT read failed for " + uri, e);
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.import_srt_failed, Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            final List<SubtitleLine> lines =
+                    com.joy.englishtube.util.SrtParser.parse(text);
+            if (lines.isEmpty()) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.import_srt_empty, Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            // Persist to the EN cache so a re-open of this video reads
+            // the imported SRT instead of refetching from YT.
+            if (captured != null && captured.equals(videoId)) {
+                try {
+                    writeCache(captured, lines);
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "SRT cache write failed for " + captured, e);
+                }
+            }
+
+            runOnUiThread(() -> {
+                if (captured == null || !captured.equals(videoId)) return;
+                applyLines(lines);
+                Toast.makeText(this,
+                        getString(R.string.import_srt_success, lines.size()),
+                        Toast.LENGTH_SHORT).show();
+            });
+        });
     }
 
     private void recordHistory(@Nullable String id) {
