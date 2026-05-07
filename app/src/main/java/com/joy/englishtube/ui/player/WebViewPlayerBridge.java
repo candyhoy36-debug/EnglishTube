@@ -112,6 +112,10 @@ public class WebViewPlayerBridge {
             + "        }"
             + "      }"
             + "      try { v.loop = !!window.__etubeLoopVideo; } catch (e) {}"
+            + "      try {"
+            + "        var pr = +window.__etubePlaybackRate;"
+            + "        if (pr > 0 && Math.abs(v.playbackRate - pr) > 0.001) v.playbackRate = pr;"
+            + "      } catch (e) {}"
             + "      var paused = !!v.paused;"
             + "      if (paused !== lastPaused) {"
             + "        lastPaused = paused;"
@@ -204,6 +208,24 @@ public class WebViewPlayerBridge {
                 + "var v=document.querySelector('video.video-stream')"
                 + "||document.querySelector('video');"
                 + "if(v){try{v.loop=" + (enabled ? "true" : "false") + ";}catch(e){}}"
+                + "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    /**
+     * Sprint 5 follow-up: set HTML5 {@code video.playbackRate} on the YT
+     * {@code <video>} element. Stores the preference on
+     * {@code window.__etubePlaybackRate} so the polling loop in
+     * {@link #JS_INSTALL} re-applies it across YT SPA transitions and
+     * {@code <video>} element re-creations (player rebuilds, ad pre-rolls).
+     */
+    @UiThread
+    public static void setPlaybackRate(@NonNull WebView webView, float rate) {
+        String js = "(function(){"
+                + "window.__etubePlaybackRate = " + rate + ";"
+                + "var v=document.querySelector('video.video-stream')"
+                + "||document.querySelector('video');"
+                + "if(v){try{v.playbackRate=" + rate + ";}catch(e){}}"
                 + "})();";
         webView.evaluateJavascript(js, null);
     }

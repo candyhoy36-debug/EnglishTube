@@ -22,6 +22,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.PopupMenu;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -169,6 +170,12 @@ public class PlayerActivity extends AppCompatActivity
      * beginning instead of YouTube auto-playing the next video.
      */
     private boolean loopVideoEnabled = false;
+    /**
+     * Sprint 5 follow-up: current playback rate applied to the YT
+     * {@code <video>}. Default 1.0f = normal speed. Persisted across
+     * YT SPA navigations via {@link WebViewPlayerBridge}.
+     */
+    private float playbackRate = 1.0f;
     private long loopStartMs = -1L;
     private long loopEndMs = -1L;
     private LangMode langMode = LangMode.EN;
@@ -346,9 +353,8 @@ public class PlayerActivity extends AppCompatActivity
         findViewById(R.id.btn_search_subtitle).setOnClickListener(v ->
                 Toast.makeText(this, R.string.search_subtitle_not_yet,
                         Toast.LENGTH_SHORT).show());
-        findViewById(R.id.btn_playback_speed).setOnClickListener(v ->
-                Toast.makeText(this, R.string.playback_speed_not_yet,
-                        Toast.LENGTH_SHORT).show());
+        TextView btnPlaybackSpeed = findViewById(R.id.btn_playback_speed);
+        btnPlaybackSpeed.setOnClickListener(v -> showPlaybackSpeedMenu(btnPlaybackSpeed));
         findViewById(R.id.btn_download_srt).setOnClickListener(v ->
                 Toast.makeText(this, R.string.download_srt_not_yet,
                         Toast.LENGTH_SHORT).show());
@@ -416,6 +422,9 @@ public class PlayerActivity extends AppCompatActivity
                 // / SPA nav rebuilds the <video> element from scratch.
                 if (loopVideoEnabled) {
                     WebViewPlayerBridge.setLoopVideo(v, true);
+                }
+                if (Math.abs(playbackRate - 1.0f) > 0.001f) {
+                    WebViewPlayerBridge.setPlaybackRate(v, playbackRate);
                 }
                 // Sprint 5: hide YT's own fullscreen button. We drive
                 // fullscreen from device rotation, and YT's button puts
@@ -823,10 +832,56 @@ public class PlayerActivity extends AppCompatActivity
     }
 
     /**
-     * Toggles whole-video looping. Drives the HTML5 {@code video.loop}
-     * flag through {@link WebViewPlayerBridge#setLoopVideo}, which keeps
-     * it applied across YT SPA navigations via the polling loop.
+     * Shows a popup anchored to the speed button with the standard YT
+     * playback rate options. The current rate is marked with a trailing
+     * "✓" and the button label flips to e.g. "1.25x" so the user can
+     * see the active speed at a glance. Selecting "1x" clears the
+     * indicator and resets the JS-side preference flag.
      */
+    private void showPlaybackSpeedMenu(@NonNull TextView anchor) {
+        final float[] options = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
+        PopupMenu menu = new PopupMenu(this, anchor);
+        for (int i = 0; i < options.length; i++) {
+            float rate = options[i];
+            String label = formatRate(rate) + (Math.abs(rate - playbackRate) < 0.001f
+                    ? "  ✓" : "");
+            menu.getMenu().add(android.view.Menu.NONE, i, i, label);
+        }
+        menu.setOnMenuItemClickListener(item -> {
+            float rate = options[item.getItemId()];
+            applyPlaybackRate(rate);
+            return true;
+        });
+        menu.show();
+    }
+
+    private void applyPlaybackRate(float rate) {
+        playbackRate = rate;
+        if (webView != null) {
+            WebViewPlayerBridge.setPlaybackRate(webView, rate);
+        }
+        TextView btn = findViewById(R.id.btn_playback_speed);
+        if (btn != null) {
+            // Show the active rate on the button so the row reflects
+            // the current state (e.g. "1.25x"). Default speed shows
+            // the original "Tốc độ" label.
+            btn.setText(Math.abs(rate - 1.0f) < 0.001f
+                    ? getString(R.string.action_playback_speed)
+                    : formatRate(rate));
+            btn.setSelected(Math.abs(rate - 1.0f) >= 0.001f);
+        }
+    }
+
+    private static String formatRate(float rate) {
+        // "1.0x", "0.75x", … — strip trailing zero on whole-number rates.
+        if (Math.abs(rate - Math.round(rate)) < 0.001f) {
+            return Math.round(rate) + "x";
+        }
+        return String.format(java.util.Locale.US, "%.2f", rate)
+                .replaceAll("0+$", "")
+                .replaceAll("\\.$", "") + "x";
+    }
+
     private void toggleLoopVideo() {
         loopVideoEnabled = !loopVideoEnabled;
         if (btnLoopVideo != null) btnLoopVideo.setSelected(loopVideoEnabled);
