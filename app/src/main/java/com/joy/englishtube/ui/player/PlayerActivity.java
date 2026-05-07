@@ -200,12 +200,11 @@ public class PlayerActivity extends AppCompatActivity
     private final PlayerSyncController syncController = new PlayerSyncControllerImpl();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final OkHttpClient http = new OkHttpClient();
-    // Auto: Google online (fast, batched) → ML Kit on-device fallback. The
-    // service is stateless so a single instance is reused across videos.
-    private final TranslationService translationService =
-            new AutoTranslateService(
-                    new GoogleTranslateService(http),
-                    new MlKitTranslateService());
+    // Translation engine is chosen based on the
+    // {@code pref_translation_service} preference and built lazily in
+    // {@link #onCreate(Bundle)}. Instance is reused across videos
+    // since none of the impls hold per-video state.
+    private TranslationService translationService;
     private long lastTickMs = 0L;
 
     private enum SubtitleState { LOADING, READY, NO_SUBTITLE, FETCH_FAILED }
@@ -239,6 +238,12 @@ public class PlayerActivity extends AppCompatActivity
             return;
         }
 
+        // Apply user prefs (set in SettingsActivity) to this session.
+        // Each one is "set the field to whatever the prefs say"; the
+        // existing button/menu wiring will pick up the new state on
+        // first onPageFinished re-push.
+        applyUserPreferences();
+
         webView = findViewById(R.id.webview_player);
         webProgress = findViewById(R.id.web_progress);
         fabSubtitles = findViewById(R.id.fab_subtitles);
@@ -246,6 +251,7 @@ public class PlayerActivity extends AppCompatActivity
         subtitleOverlay = findViewById(R.id.subtitle_overlay);
         tvOverlayEn = findViewById(R.id.tv_overlay_en);
         tvOverlayVi = findViewById(R.id.tv_overlay_vi);
+        bindOverlayStyling();
         playerActionBar = findViewById(R.id.player_action_bar);
         fullscreenTapArea = findViewById(R.id.fullscreen_tap_area);
         btnFullscreenPlayPause = findViewById(R.id.btn_fullscreen_play_pause);
@@ -327,6 +333,15 @@ public class PlayerActivity extends AppCompatActivity
 
         btnEnterFullscreen.setOnClickListener(v -> requestFullscreenOrientation(true));
         applyLangMode();
+        // Reflect prefs-derived combine + loop state on the buttons.
+        // applyCombineMode short-circuits when next == current, so we
+        // toggle the selected flags directly here.
+        if (btnCombineLines != null)
+            btnCombineLines.setSelected(combineMode == CombineMode.MODE1);
+        if (btnCombineLinesStrict != null)
+            btnCombineLinesStrict.setSelected(combineMode == CombineMode.MODE2);
+        if (btnLoopVideo != null)
+            btnLoopVideo.setSelected(loopVideoEnabled);
     }
 
     /**
@@ -371,6 +386,12 @@ public class PlayerActivity extends AppCompatActivity
         btnEditSubtitle.setOnClickListener(v -> toggleEditSubtitleMode(btnEditSubtitle));
         TextView btnPlaybackSpeed = findViewById(R.id.btn_playback_speed);
         btnPlaybackSpeed.setOnClickListener(v -> showPlaybackSpeedMenu(btnPlaybackSpeed));
+        // Reflect any prefs-derived non-1x speed on the button label
+        // (the WebView-side push happens in onPageFinished).
+        if (Math.abs(playbackRate - 1.0f) > 0.001f) {
+            btnPlaybackSpeed.setText(formatRate(playbackRate));
+            btnPlaybackSpeed.setSelected(true);
+        }
         findViewById(R.id.btn_download_srt).setOnClickListener(v ->
                 Toast.makeText(this, R.string.download_srt_not_yet,
                         Toast.LENGTH_SHORT).show());
@@ -1428,6 +1449,97 @@ public class PlayerActivity extends AppCompatActivity
      * timestamp so the row already exists by the time the title
      * lands.
      */
+    /**
+     * Reads SharedPreferences (written by SettingsFragment) and seeds
+     * the corresponding fields. Called once from onCreate before the
+     * UI bindings run, so the buttons pick up the right initial state
+     * without an extra refresh pass.
+     */
+    private void applyUserPreferences() {
+        android.content.SharedPreferences sp =
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+
+        // Lang mode default
+        String langStr = sp.getString(com.joy.englishtube.util.PrefsKeys.LANG_MODE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_LANG_MODE);
+        try {
+            langMode = LangMode.valueOf(langStr);
+        } catch (IllegalArgumentException ignored) { /* fallback to current */ }
+
+        // Combine mode default
+        String combineStr = sp.getString(com.joy.englishtube.util.PrefsKeys.COMBINE_MODE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_COMBINE_MODE);
+        try {
+            combineMode = CombineMode.valueOf(combineStr);
+        } catch (IllegalArgumentException ignored) { /* fallback to NONE */ }
+
+        // Playback speed default
+        String speedStr = sp.getString(com.joy.englishtube.util.PrefsKeys.PLAYBACK_SPEED,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_PLAYBACK_SPEED);
+        try {
+            playbackRate = Float.parseFloat(speedStr);
+        } catch (NumberFormatException ignored) {
+            playbackRate = 1.0f;
+        }
+
+        // Loop default
+        loopVideoEnabled = sp.getBoolean(com.joy.englishtube.util.PrefsKeys.LOOP_VIDEO,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_LOOP_VIDEO);
+
+        // Translation engine
+        String engine = sp.getString(com.joy.englishtube.util.PrefsKeys.TRANSLATION_SERVICE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_TRANSLATION_SERVICE);
+        switch (engine == null ? "GOOGLE" : engine) {
+            case "MLKIT":
+                translationService = new MlKitTranslateService();
+                break;
+            case "AUTO":
+                translationService = new AutoTranslateService(
+                        new GoogleTranslateService(http),
+                        new MlKitTranslateService());
+                break;
+            case "GOOGLE":
+            default:
+                translationService = new GoogleTranslateService(http);
+                break;
+        }
+
+        // Overlay styling: font size in sp, opacity 0..100 → alpha 0..255.
+        int fontSp = sp.getInt(com.joy.englishtube.util.PrefsKeys.OVERLAY_FONT_SIZE,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_FONT_SIZE_SP);
+        int opacity = sp.getInt(com.joy.englishtube.util.PrefsKeys.OVERLAY_OPACITY,
+                com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_OPACITY_PERCENT);
+        // Defer applying to the views until they're inflated. Cache the
+        // values now and let bindOverlayStyling() pick them up.
+        pendingOverlayFontSp = fontSp;
+        pendingOverlayOpacityPercent = opacity;
+    }
+
+    private int pendingOverlayFontSp = com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_FONT_SIZE_SP;
+    private int pendingOverlayOpacityPercent = com.joy.englishtube.util.PrefsKeys.DEFAULT_OVERLAY_OPACITY_PERCENT;
+
+    /**
+     * Apply pending overlay styling (font size + scrim alpha) to the
+     * inflated overlay views. Called once {@link #subtitleOverlay} is
+     * resolved from the layout. Safe to call multiple times.
+     */
+    private void bindOverlayStyling() {
+        if (tvOverlayEn != null) {
+            tvOverlayEn.setTextSize(pendingOverlayFontSp);
+        }
+        if (tvOverlayVi != null) {
+            // Vietnamese row sits at ~80% of the EN row, mimicking the
+            // hard-coded 20sp/16sp ratio in the original layout.
+            tvOverlayVi.setTextSize(pendingOverlayFontSp * 0.8f);
+        }
+        if (subtitleOverlay != null) {
+            int alpha = (int) Math.round(pendingOverlayOpacityPercent * 255.0 / 100.0);
+            alpha = Math.max(0, Math.min(255, alpha));
+            // Black scrim with user-selected alpha.
+            subtitleOverlay.setBackgroundColor((alpha << 24));
+        }
+    }
+
     private void recordHistory(@Nullable String id) {
         if (id == null || id.isEmpty()) return;
         final String captured = id;

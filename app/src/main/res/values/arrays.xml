@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string-array name="pref_lang_mode_entries">
+        <item>EN</item>
+        <item>VI</item>
+        <item>EN + VI</item>
+    </string-array>
+    <string-array name="pref_lang_mode_values">
+        <item>EN</item>
+        <item>VI</item>
+        <item>BOTH</item>
+    </string-array>
+
+    <string-array name="pref_combine_mode_entries">
+        <item>Tắt (raw cues)</item>
+        <item>Ghép câu (mode 1)</item>
+        <item>Ghép câu strict (mode 2)</item>
+    </string-array>
+    <string-array name="pref_combine_mode_values">
+        <item>NONE</item>
+        <item>MODE1</item>
+        <item>MODE2</item>
+    </string-array>
+
+    <string-array name="pref_playback_speed_entries">
+        <item>0.5x</item>
+        <item>0.75x</item>
+        <item>1x</item>
+        <item>1.25x</item>
+        <item>1.5x</item>
+        <item>1.75x</item>
+        <item>2x</item>
+    </string-array>
+    <string-array name="pref_playback_speed_values">
+        <item>0.5</item>
+        <item>0.75</item>
+        <item>1.0</item>
+        <item>1.25</item>
+        <item>1.5</item>
+        <item>1.75</item>
+        <item>2.0</item>
+    </string-array>
+
+    <string-array name="pref_translation_service_entries">
+        <item>Google Translate</item>
+        <item>ML Kit (offline)</item>
+        <item>Tự động (Google → ML Kit fallback)</item>
+    </string-array>
+    <string-array name="pref_translation_service_values">
+        <item>GOOGLE</item>
+        <item>MLKIT</item>
+        <item>AUTO</item>
+    </string-array>
+
+</resources>
