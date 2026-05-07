@@ -349,9 +349,6 @@ public class PlayerActivity extends AppCompatActivity
         findViewById(R.id.btn_playback_speed).setOnClickListener(v ->
                 Toast.makeText(this, R.string.playback_speed_not_yet,
                         Toast.LENGTH_SHORT).show());
-        findViewById(R.id.btn_text_size).setOnClickListener(v ->
-                Toast.makeText(this, R.string.text_size_not_yet,
-                        Toast.LENGTH_SHORT).show());
         findViewById(R.id.btn_download_srt).setOnClickListener(v ->
                 Toast.makeText(this, R.string.download_srt_not_yet,
                         Toast.LENGTH_SHORT).show());
