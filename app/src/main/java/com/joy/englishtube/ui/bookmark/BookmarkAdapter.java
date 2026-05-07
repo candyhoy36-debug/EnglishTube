@@ -3,11 +3,13 @@ package com.joy.englishtube.ui.bookmark;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.bumptech.glide.Glide;
 import com.joy.englishtube.R;
 import com.joy.englishtube.data.BookmarkEntity;
 
@@ -18,9 +20,17 @@ import java.util.Map;
 
 /**
  * Flat-list RecyclerView adapter that renders bookmarks grouped by
- * video. Each group's first row is a header showing the video title
- * (or videoId fallback); subsequent rows are the actual bookmarks
- * within that video, ordered by start timestamp.
+ * video. Each group is visually a single rounded-corner card:
+ * <ul>
+ *   <li>Header row (rounded top corners) — YT thumbnail, title,
+ *       count badge.</li>
+ *   <li>One or more bookmark rows — square-cornered middle pieces.
+ *       The last bookmark of a group gets a "card bottom" background
+ *       so its bottom corners stay rounded.</li>
+ * </ul>
+ * Header and item live in separate XML files; the bottom-corner
+ * swap happens in {@link #onBindViewHolder} based on the next row's
+ * type.
  */
 class BookmarkAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
@@ -32,20 +42,33 @@ class BookmarkAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         void onLongPress(@NonNull BookmarkEntity row);
     }
 
-    /** Either a header (videoTitle/videoId) or an item (BookmarkEntity). */
+    /**
+     * Either a header (with display label, thumbnail URL, count) or
+     * an item (BookmarkEntity). Headers are pure presentation — the
+     * raw entities still drive search/long-press.
+     */
     static final class Row {
         final boolean isHeader;
         @androidx.annotation.Nullable final String headerLabel;
+        @androidx.annotation.Nullable final String headerThumbnailUrl;
+        final int headerCount;
         @androidx.annotation.Nullable final BookmarkEntity entity;
 
-        private Row(boolean header, String label, BookmarkEntity e) {
+        private Row(boolean header, String label, String thumb, int count,
+                    BookmarkEntity e) {
             this.isHeader = header;
             this.headerLabel = label;
+            this.headerThumbnailUrl = thumb;
+            this.headerCount = count;
             this.entity = e;
         }
 
-        static Row header(String label) { return new Row(true, label, null); }
-        static Row item(BookmarkEntity e) { return new Row(false, null, e); }
+        static Row header(String label, String thumb, int count) {
+            return new Row(true, label, thumb, count, null);
+        }
+        static Row item(BookmarkEntity e) {
+            return new Row(false, null, null, 0, e);
+        }
     }
 
     private final List<Row> rows = new ArrayList<>();
@@ -65,7 +88,8 @@ class BookmarkAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
      * Group a flat list of bookmarks (already ordered by videoId,
      * startMs from the DAO) into header + item rows. Header label
      * uses the most-recent non-null videoTitle for that videoId, or
-     * falls back to the videoId string itself.
+     * falls back to the videoId string itself. Thumbnail is derived
+     * from videoId via the canonical YT mqdefault URL.
      */
     static List<Row> group(@NonNull List<BookmarkEntity> source) {
         // Preserve insertion order — DAO returns videoId-grouped already.
@@ -81,7 +105,9 @@ class BookmarkAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
         List<Row> out = new ArrayList<>();
         for (Map.Entry<String, List<BookmarkEntity>> e : byVideo.entrySet()) {
-            out.add(Row.header(labels.getOrDefault(e.getKey(), e.getKey())));
+            String label = labels.getOrDefault(e.getKey(), e.getKey());
+            String thumb = "https://i.ytimg.com/vi/" + e.getKey() + "/mqdefault.jpg";
+            out.add(Row.header(label, thumb, e.getValue().size()));
             for (BookmarkEntity item : e.getValue()) out.add(Row.item(item));
         }
         return out;
@@ -108,12 +134,30 @@ class BookmarkAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder vh, int position) {
         Row r = rows.get(position);
         if (vh instanceof HeaderVH) {
-            ((HeaderVH) vh).title.setText(r.headerLabel);
+            HeaderVH hh = (HeaderVH) vh;
+            hh.title.setText(r.headerLabel);
+            hh.count.setText(String.valueOf(r.headerCount));
+            if (r.headerThumbnailUrl != null) {
+                Glide.with(hh.thumbnail.getContext())
+                        .load(r.headerThumbnailUrl)
+                        .centerCrop()
+                        .into(hh.thumbnail);
+            }
             return;
         }
         BookmarkEntity b = r.entity;
         if (b == null) return;
         ItemVH h = (ItemVH) vh;
+
+        // Last row of the card gets rounded bottom corners; rows in
+        // the middle stay flat so consecutive bookmarks read as one
+        // card rather than a stack of pills.
+        boolean isLastInGroup = (position == rows.size() - 1)
+                || rows.get(position + 1).isHeader;
+        h.itemView.setBackgroundResource(isLastInGroup
+                ? R.drawable.bg_bookmark_card_bottom
+                : R.drawable.bg_bookmark_card_middle);
+
         h.timestamp.setText(formatMs(b.startMs));
         h.textEn.setText(b.textEn);
         if (b.textVi != null && !b.textVi.isEmpty()) {
@@ -151,9 +195,13 @@ class BookmarkAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     static class HeaderVH extends RecyclerView.ViewHolder {
         final TextView title;
+        final TextView count;
+        final ImageView thumbnail;
         HeaderVH(@NonNull View itemView) {
             super(itemView);
             title = itemView.findViewById(R.id.group_title);
+            count = itemView.findViewById(R.id.group_count);
+            thumbnail = itemView.findViewById(R.id.thumbnail);
         }
     }
 
